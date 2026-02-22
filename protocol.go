@@ -23,9 +23,9 @@ func recvFrameBytes(conn net.Conn) ([]byte, error) {
 	}
 
 	length := binary.BigEndian.Uint32(header)
-	frame_bytes, err := recvExact(conn, int(length))
+	frameBytes, err := recvExact(conn, int(length))
 
-	return frame_bytes, err
+	return frameBytes, err
 }
 
 func recvJSON(conn net.Conn) (map[string]bool, error) {

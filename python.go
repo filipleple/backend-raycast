@@ -2,36 +2,8 @@ package main
 
 import (
 	"encoding/json"
-	"log"
 	"net"
-	"os"
-	"time"
 )
-
-func tickRenderer() {
-	pythonClient, err := NewPythonClient("127.0.0.1:9000")
-	if err != nil {
-		panic(err)
-	}
-
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-
-	tick := 0
-
-	for range ticker.C {
-		tick++
-		input := map[string]bool{"right": true}
-		pngBytes, err := pythonClient.SendInput(input)
-		if err != nil {
-			panic(err)
-		}
-
-		err = os.WriteFile("test_go.png", pngBytes, 0644)
-
-		log.Printf("tick=%d bytes=%d\n", tick, len(pngBytes))
-	}
-}
 
 type PythonClient struct {
 	conn net.Conn

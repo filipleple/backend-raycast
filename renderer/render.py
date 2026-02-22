@@ -86,8 +86,8 @@ def handle_client(conn):
         while True:
             try:
                 inputs = recv_json(conn)
-                print("received inputs")
-                print(inputs)
+                # print("received inputs")
+                # print(inputs)
             except ConnectionError:
                 break
             update(state, inputs)
