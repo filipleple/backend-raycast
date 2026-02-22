@@ -1,3 +1,6 @@
+import socket
+import struct
+import json
 import numpy as np
 import io
 from PIL import Image, ImageDraw
@@ -13,7 +16,41 @@ PLAYER_SIDE = 80
 PLAYER_COLOR = (0, 200, 0)
 PLAYER_SPEED = 5
 
+HOST = "127.0.0.1"
+PORT = 9000
 
+
+#
+# SOCKET HANDLING
+# 
+def recv_exact(sock, n):
+    data = bytearray()
+    while len(data) < n:
+        chunk = sock.recv(n - len(data))
+        if not chunk:
+            # EOF before full frame
+            raise ConnectionError("EOF mid-frame")
+        data.extend(chunk)
+    return bytes(data)
+
+def recv_frame(sock):
+    # read 4-byte length
+    header = recv_exact(sock, 4)
+    length = struct.unpack("!I", header)[0]  # big-endian unsigned int
+
+    # read payload
+    payload = recv_exact(sock, length)
+
+    # decode JSON
+    return json.loads(payload.decode("utf-8"))
+
+def send_frame(sock, payload_bytes):
+    header = struct.pack("!I", len(payload_bytes))
+    sock.sendall(header + payload_bytes)
+
+#
+# GAME STATE / RENDERING
+#
 class Renderer:
     def __init__(self, width, height):
         self.width = width
@@ -75,7 +112,9 @@ def write_file(file, path):
     with open(path, "wb") as f:
         f.write(file)
 
-
+#
+# Main entry point (testing)
+# 
 state = GameState()
 renderer = Renderer(FRAME_WIDTH, FRAME_HEIGHT)
 
