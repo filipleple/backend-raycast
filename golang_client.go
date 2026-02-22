@@ -4,8 +4,10 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"log"
 	"net"
 	"os"
+	"time"
 )
 
 // [*] connect to socket
@@ -81,34 +83,38 @@ func writeFull(conn net.Conn, buf []byte) error {
 }
 
 func main() {
-	msg := map[string]bool{
-		"right": true,
-	}
-
-	data, err := json.Marshal(msg)
-	if err != nil {
-		panic(err)
-	}
-
 	conn, err := net.Dial("tcp", "127.0.0.1:9000")
 	if err != nil {
 		panic(err)
 	}
 	defer conn.Close()
 
-	var png []byte
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 
-	for i := 0; i < 10; i++ {
-		if err := sendFrame(conn, data); err != nil {
+	tick := 0
+
+	for range ticker.C {
+		tick++
+
+		input := map[string]bool{"right": true}
+		jsonBytes, err := json.Marshal(input)
+		if err != nil {
 			panic(err)
 		}
-		if png, err = recvBinary(conn); err != nil {
+
+		err = sendFrame(conn, jsonBytes)
+		if err != nil {
 			panic(err)
 		}
-	}
 
-	err = os.WriteFile("test_go.png", png, 0644)
-	if err != nil {
-		panic(err)
+		pngBytes, err := recvBinary(conn)
+		if err != nil {
+			panic(err)
+		}
+
+		err = os.WriteFile("test_go.png", pngBytes, 0644)
+
+		log.Printf("tick=%d bytes=%d\n", tick, len(pngBytes))
 	}
 }
