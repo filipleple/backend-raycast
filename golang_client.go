@@ -80,19 +80,19 @@ func writeFull(conn net.Conn, buf []byte) error {
 	return nil
 }
 
-func probeRenderer() error {
+func main() {
 	msg := map[string]bool{
 		"right": true,
 	}
 
 	data, err := json.Marshal(msg)
 	if err != nil {
-		return err
+		panic(err)
 	}
 
 	conn, err := net.Dial("tcp", "127.0.0.1:9000")
 	if err != nil {
-		return err
+		panic(err)
 	}
 	defer conn.Close()
 
@@ -100,20 +100,15 @@ func probeRenderer() error {
 
 	for i := 0; i < 10; i++ {
 		if err := sendFrame(conn, data); err != nil {
-			return err
+			panic(err)
 		}
 		if png, err = recvBinary(conn); err != nil {
-			return err
+			panic(err)
 		}
 	}
 
 	err = os.WriteFile("test_go.png", png, 0644)
 	if err != nil {
-		return err
+		panic(err)
 	}
-	return nil
-}
-
-func main() {
-	probeRenderer()
 }
