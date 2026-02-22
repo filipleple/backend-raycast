@@ -35,6 +35,7 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		wsConn: ws,
 		pyConn: pythonClient,
 		input:  make(map[string]bool),
+		done:   make(chan struct{}),
 	}
 
 	session.Start()
