@@ -40,7 +40,7 @@ type PythonClient struct {
 func NewPythonClient(addr string) (*PythonClient, error) {
 	conn, err := net.Dial("tcp", addr)
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 
 	newClient := new(PythonClient)
