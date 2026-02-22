@@ -8,7 +8,9 @@ data = json.dumps(msg).encode("utf-8")
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.connect(("127.0.0.1", 9000))
 
-    send_frame(s, data)
-    png = recv_binary(s)
+    for i in range(0, 10):
+        send_frame(s, data)
+        png = recv_binary(s)
+
     with open("test.png", "wb") as f:
         f.write(png)
