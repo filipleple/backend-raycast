@@ -13,7 +13,8 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	http.Handle("/", http.FileServer(http.Dir("./")))
+	tickRenderer()
+	http.Handle("/", http.FileServer(http.Dir("./static/")))
 	http.HandleFunc("/ws", handleWS)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }

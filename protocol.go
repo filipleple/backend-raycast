@@ -7,13 +7,6 @@ import (
 	"net"
 )
 
-// [*] connect to socket
-// [*] build a frame of given length, with given payload
-// [*] parse the frame as event json
-// [*] send the frame over a socket
-// [*] recieve frame of given length
-// [ ] probe the renderer and save received png
-
 func recvExact(conn net.Conn, length int) ([]byte, error) {
 	buf := make([]byte, length)
 	_, err := io.ReadFull(conn, buf)

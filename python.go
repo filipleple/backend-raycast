@@ -9,11 +9,11 @@ import (
 )
 
 func tickRenderer() {
-	conn, err := net.Dial("tcp", "127.0.0.1:9000")
+	pythonClient, err := NewPythonClient("127.0.0.1:9000")
 	if err != nil {
 		panic(err)
 	}
-	defer conn.Close()
+	defer pythonClient.Close()
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -22,19 +22,8 @@ func tickRenderer() {
 
 	for range ticker.C {
 		tick++
-
 		input := map[string]bool{"right": true}
-		jsonBytes, err := json.Marshal(input)
-		if err != nil {
-			panic(err)
-		}
-
-		err = sendFrame(conn, jsonBytes)
-		if err != nil {
-			panic(err)
-		}
-
-		pngBytes, err := recvBinary(conn)
+		pngBytes, err := pythonClient.SendInput(input)
 		if err != nil {
 			panic(err)
 		}
@@ -43,4 +32,43 @@ func tickRenderer() {
 
 		log.Printf("tick=%d bytes=%d\n", tick, len(pngBytes))
 	}
+}
+
+type PythonClient struct {
+	conn net.Conn
+}
+
+func NewPythonClient(addr string) (*PythonClient, error) {
+	conn, err := net.Dial("tcp", addr)
+	if err != nil {
+		panic(err)
+	}
+
+	newClient := new(PythonClient)
+	newClient.conn = conn
+
+	return newClient, nil
+}
+
+func (p *PythonClient) SendInput(input map[string]bool) ([]byte, error) {
+	jsonBytes, err := json.Marshal(input)
+	if err != nil {
+		panic(err)
+	}
+
+	err = sendFrame(p.conn, jsonBytes)
+	if err != nil {
+		return nil, err
+	}
+
+	pngBytes, err := recvBinary(p.conn)
+	if err != nil {
+		return nil, err
+	}
+
+	return pngBytes, nil
+}
+
+func (p *PythonClient) Close() {
+	p.conn.Close()
 }
