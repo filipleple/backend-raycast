@@ -78,6 +78,21 @@ def update(state, inputs):
     state.player_x = max(0, min(state.player_x, FRAME_WIDTH - PLAYER_SIDE))
     state.player_y = max(0, min(state.player_y, FRAME_HEIGHT - state.player_side))
 
+def handle_client(conn):
+    state = GameState()
+    renderer = Renderer(FRAME_WIDTH, FRAME_HEIGHT)
+
+    with conn:
+        while True:
+            try:
+                inputs = recv_json(conn)
+            except ConnectionError:
+                break
+            update(state, inputs)
+            pil_img = renderer.render(state)
+            png = renderer.encode_png(pil_img)
+            send_frame(conn, png)
+
 #
 # Main entry point
 # 
@@ -89,13 +104,4 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     s.listen(1)
 
     conn, addr = s.accept()
-    with conn:
-        while True:
-            try:
-                inputs = recv_json(conn)
-            except ConnectionError:
-                break
-            update(state, inputs)
-            pil_img = renderer.render(state)
-            png = renderer.encode_png(pil_img)
-            send_frame(conn, png)
+    handle_client(conn)
