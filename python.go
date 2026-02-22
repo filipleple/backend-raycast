@@ -13,7 +13,6 @@ func tickRenderer() {
 	if err != nil {
 		panic(err)
 	}
-	defer pythonClient.Close()
 
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()

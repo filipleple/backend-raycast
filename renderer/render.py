@@ -66,13 +66,13 @@ class GameState:
         )
 
 def update(state, inputs):
-    if (inputs.get("left")):
+    if (inputs.get("ArrowLeft")):
         state.player_x -= PLAYER_SPEED
-    if (inputs.get("right")):
+    if (inputs.get("ArrowRight")):
         state.player_x += PLAYER_SPEED
-    if (inputs.get("up")):
+    if (inputs.get("ArrowUp")):
         state.player_y -= PLAYER_SPEED
-    if (inputs.get("down")):
+    if (inputs.get("ArrowDown")):
         state.player_y += PLAYER_SPEED
 
     state.player_x = max(0, min(state.player_x, FRAME_WIDTH - PLAYER_SIDE))
@@ -86,6 +86,8 @@ def handle_client(conn):
         while True:
             try:
                 inputs = recv_json(conn)
+                print("received inputs")
+                print(inputs)
             except ConnectionError:
                 break
             update(state, inputs)

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"log"
 	"net/http"
 
@@ -13,40 +12,30 @@ var upgrader = websocket.Upgrader{
 }
 
 func main() {
-	tickRenderer()
+	// tickRenderer()
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
 	http.HandleFunc("/ws", handleWS)
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println("upgrade error:", err)
 		return
 	}
-	defer conn.Close()
 
-	inputState := make(map[string]bool)
-
-	for {
-		_, msg, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("read error:", err)
-			return
-		}
-
-		var incoming map[string]bool
-		err = json.Unmarshal(msg, &incoming)
-		if err != nil {
-			log.Println("json error:", err)
-			continue
-		}
-
-		for k, v := range incoming {
-			inputState[k] = v
-		}
-
-		log.Printf("current input state: %+v\n", inputState)
+	pythonClient, err := NewPythonClient("127.0.0.1:9000")
+	if err != nil {
+		ws.Close()
+		return
 	}
+
+	session := &Session{
+		wsConn: ws,
+		pyConn: pythonClient,
+		input:  make(map[string]bool),
+	}
+
+	session.run()
 }
