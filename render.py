@@ -78,10 +78,6 @@ def update(state, inputs):
     state.player_x = max(0, min(state.player_x, FRAME_WIDTH - PLAYER_SIDE))
     state.player_y = max(0, min(state.player_y, FRAME_HEIGHT - state.player_side))
 
-def write_file(file, path):
-    with open(path, "wb") as f:
-        f.write(file)
-
 #
 # Main entry point
 # 
