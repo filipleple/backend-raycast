@@ -113,17 +113,23 @@ def write_file(file, path):
         f.write(file)
 
 #
-# Main entry point (testing)
+# Main entry point
 # 
 state = GameState()
 renderer = Renderer(FRAME_WIDTH, FRAME_HEIGHT)
 
-img = renderer.render(state)
-png = renderer.encode_png(img)
-write_file(png, "out.png")
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind((HOST, PORT))
+    s.listen(1)
 
-update(state, {"left": True})
-
-img = renderer.render(state)
-png = renderer.encode_png(img)
-write_file(png, "out2.png")
+    conn, addr = s.accept()
+    with conn:
+        while True:
+            try:
+                inputs = recv_frame(conn)
+            except ConnectionError:
+                break
+            update(state, inputs)
+            pil_img = renderer.render(state)
+            png = renderer.encode_png(pil_img)
+            send_frame(conn, png)
