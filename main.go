@@ -37,5 +37,5 @@ func handleWS(w http.ResponseWriter, r *http.Request) {
 		input:  make(map[string]bool),
 	}
 
-	session.run()
+	session.Start()
 }
