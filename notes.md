@@ -8,5 +8,9 @@
 
 # random ideas
 
-* maybe have two sockets, one for player 1 other for player 2 and try to manage their states independently?
-  and manage collision detection in such scenario?
+* maybe have two sockets, one for player 1 other for player 2 and try to manage
+  their states independently? and manage collision detection in such scenario?
+
+* a game where two players control one character, and they want to get it into
+  two different goal posts? with a clever map (maybe with some common objectives
+  to unlock each goal) this could work similarly to a tic tac toe game

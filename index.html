@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html>
+<body>
+<script>
+const inputState = {};
+const ws = new WebSocket("ws://localhost:8080/ws");
+
+window.addEventListener("keydown", (e) => {
+    inputState[e.key] = true;
+});
+
+window.addEventListener("keyup", (e) => {
+    inputState[e.key] = false;
+});
+
+setInterval(() => {
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(inputState));
+    }
+}, 50); // 20Hz
+</script>
+</body>
+</html>
