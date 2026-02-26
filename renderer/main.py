@@ -8,7 +8,7 @@ import numpy as np
 import io
 
 # Window settings
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 800, 800
 WALL = 1
 EMPTY = 0
 

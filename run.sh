@@ -2,5 +2,5 @@
 
 trap 'kill 0' EXIT
 
-python3 ./renderer/render.py &
+python3 ./renderer/main.py &
 go run .
