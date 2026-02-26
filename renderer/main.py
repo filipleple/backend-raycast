@@ -8,7 +8,7 @@ import numpy as np
 import io
 
 # Window settings
-WIDTH, HEIGHT = 800, 800
+WIDTH, HEIGHT = 640, 480
 WALL = 1
 EMPTY = 0
 
@@ -25,6 +25,7 @@ PANE_COLOR = RED
 # FOV/raycasting settings
 FOV_ANGLE = 60
 NUM_RAYS = 120
+PLAYER_SPEED = 10
 
 # Protocol settings
 HOST = "127.0.0.1"
@@ -73,7 +74,7 @@ class Renderer:
 
     def cast_fov_on_state(self, state):
         return cast_fov(state.grid, state.cols, state.rows, state.tile_size,
-                 state.originX, state.originY, state.cam_angle,
+                 state.playerX, state.playerY, state.cam_angle,
                  FOV_ANGLE, NUM_RAYS)
 
     def render_panes(self, draw, distances, fov_angle, tile_size):
@@ -103,25 +104,21 @@ class GameState:
         self.tile_size = min(WIDTH // self.cols, HEIGHT // self.rows)
         self.grid = generate_map(self.cols, self.rows, fill=0.35, seed=None)
         self.cam_angle = 0.0
-        self.originX, self.originY = 0,0
+        self.playerX, self.playerY = 0,0
 
 def update(state, inputs):
-    # inputs ignored for now, using pygame get
+    if (inputs.get("ArrowLeft")):
+        state.playerX -= PLAYER_SPEED
+    if (inputs.get("ArrowRight")):
+        state.playerX += PLAYER_SPEED
+    if (inputs.get("ArrowUp")):
+        state.playerY -= PLAYER_SPEED
+    if (inputs.get("ArrowDown")):
+        state.playerY += PLAYER_SPEED
     
-    # for event in pygame.event.get():
-    #     if event.type == pygame.QUIT:
-    #         return False
     #     if event.type == pygame.MOUSEWHEEL:
     #         state.cam_angle += event.y*0.1
 
-    #     if event.type == pygame.KEYDOWN:
-    #         if event.key == pygame.K_SPACE:
-    #             renderer.write_png(state, "test.png")
-    #             print("Space!")
-
-    # # Get the mouse position
-    # state.originX, state.originY = pygame.mouse.get_pos()
-    # 
     state.cam_angle = state.cam_angle % 360
     
 renderer = Renderer()
