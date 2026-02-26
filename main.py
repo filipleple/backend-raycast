@@ -1,5 +1,5 @@
-import pygame
-import sys
+import socket
+from protocol import recv_json, send_frame
 from math import cos, tan, radians
 from mapgen import generate_map
 from fov import cast_fov
@@ -25,6 +25,10 @@ PANE_COLOR = RED
 # FOV/raycasting settings
 FOV_ANGLE = 60
 NUM_RAYS = 120
+
+# Protocol settings
+HOST = "127.0.0.1"
+PORT = 9000
 
 class Renderer:
     def __init__(self, width=WIDTH, height=HEIGHT):
@@ -104,33 +108,22 @@ class GameState:
 def update(state, inputs):
     # inputs ignored for now, using pygame get
     
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            return False
-        if event.type == pygame.MOUSEWHEEL:
-            state.cam_angle += event.y*0.1
+    # for event in pygame.event.get():
+    #     if event.type == pygame.QUIT:
+    #         return False
+    #     if event.type == pygame.MOUSEWHEEL:
+    #         state.cam_angle += event.y*0.1
 
-        if event.type == pygame.KEYDOWN:
-            if event.key == pygame.K_SPACE:
-                renderer.write_png(state, "test.png")
-                print("Space!")
+    #     if event.type == pygame.KEYDOWN:
+    #         if event.key == pygame.K_SPACE:
+    #             renderer.write_png(state, "test.png")
+    #             print("Space!")
 
-    # Get the mouse position
-    state.originX, state.originY = pygame.mouse.get_pos()
+    # # Get the mouse position
+    # state.originX, state.originY = pygame.mouse.get_pos()
+    # 
     state.cam_angle = state.cam_angle % 360
-
-    return True
     
-def pil_to_pygame(pil_img):
-      raw = pil_img.tobytes()
-      return pygame.image.frombuffer(raw, pil_img.size, "RGB")
-    
-# Initialize pygame
-pygame.init()
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("Raycasting Test")
-clock = pygame.time.Clock()
-
 renderer = Renderer()
 state = GameState()
 
@@ -151,20 +144,13 @@ def handle_client(conn):
             png = renderer.encode_png(pil_img)
             send_frame(conn, png)
 
-
+#
+# Main entry point
 # 
-# Main loop
-# 
-running = True
-while running:
-    # GAME STATE MANAGEMENT
-    running = update(state, None)
-    
-    # RENDERING
-    screen.fill(WHITE)
-    screen.blit(pil_to_pygame(renderer.render(state)), (0,0))
-    pygame.display.flip()
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.bind((HOST, PORT))
+    s.listen(1)
 
-    clock.tick(60)
-pygame.quit()
-sys.exit()
+    while True:
+        conn, addr = s.accept()
+        handle_client(conn)
