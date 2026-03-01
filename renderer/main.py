@@ -9,10 +9,10 @@ import numpy as np
 import io
 
 # Window settings
-WIDTH, HEIGHT = 800, 800
+WIDTH, HEIGHT = 640, 480
 WALL = 1
 EMPTY = 0
-GRID_SIZE = 100
+GRID_SIZE = 50
 
 # Colors
 WHITE = (255, 255, 255)
@@ -118,8 +118,8 @@ class GameState:
                         best_dist = dist
                         best = (col, row)
         col, row = best
-        self.playerX = (col + 0.5) * GRID_SIZE
-        self.playerY = (row + 0.5) * GRID_SIZE
+        self.playerX = (col + 0.5) * self.tile_size
+        self.playerY = (row + 0.5) * self.tile_size
 
 
 def update(state, inputs):
@@ -166,15 +166,16 @@ def update(state, inputs):
     newY = state.playerY + moveY
 
     # axis-split collision: check X and Y independently for wall sliding
+    ts = state.tile_size
     if moveX != 0:
-        cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / GRID_SIZE)
-        cy = int(state.playerY / GRID_SIZE)
+        cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / ts)
+        cy = int(state.playerY / ts)
         if not (0 <= cx < state.cols and 0 <= cy < state.rows) or state.grid[cy][cx] == WALL:
             newX = state.playerX
 
     if moveY != 0:
-        cx = int(newX / GRID_SIZE)
-        cy = int((newY + math.copysign(PLAYER_MARGIN, moveY)) / GRID_SIZE)
+        cx = int(newX / ts)
+        cy = int((newY + math.copysign(PLAYER_MARGIN, moveY)) / ts)
         if not (0 <= cx < state.cols and 0 <= cy < state.rows) or state.grid[cy][cx] == WALL:
             newY = state.playerY
 

@@ -1,6 +1,5 @@
 
 * Frame size: 640 by 480
-* Square size: fixed side length 80
 * Tick rate: fixed interval 50 ms
 * Transport framing: 4 byte big endian length prefix for every message on TCP
 * One session only for now, even if the Go side can accept multiple
