@@ -47,7 +47,9 @@ class Renderer:
         pil_img = Image.fromarray(img, mode="RGB")
         draw = ImageDraw.Draw(pil_img)
 
-        self.draw_wall_map(draw, state)
+        if (state.show_map):
+            self.draw_wall_map(draw, state)
+
         distances, sides = self.cast_fov_on_state(state)
         self.render_panes(draw, distances, FOV_ANGLE, state.tile_size)
 
@@ -104,6 +106,8 @@ class Renderer:
 
 class GameState:
     def __init__(self):
+        self.show_map = False
+        self.prev_inputs = {}
         self.cols, self.rows = WIDTH//GRID_SIZE, HEIGHT//GRID_SIZE
         self.tile_size = min(WIDTH // self.cols, HEIGHT // self.rows)
         self.grid = generate_map(self.cols, self.rows, fill=0.35, seed=None)
@@ -140,6 +144,9 @@ def update(state, inputs):
     moveX = 0.0
     moveY = 0.0
 
+    if inputs.get("m") and not state.prev_inputs.get("m"):
+        state.show_map = not state.show_map
+
     # --- forward/back ---
     if inputs.get("ArrowUp"):
         moveX += dirX * PLAYER_SPEED
@@ -149,10 +156,10 @@ def update(state, inputs):
         moveY -= dirY * PLAYER_SPEED
 
     # --- strafe (example: A/D) ---
-    if inputs.get("KeyA"):
+    if inputs.get("a"):
         moveX -= rightX * PLAYER_SPEED
         moveY -= rightY * PLAYER_SPEED
-    if inputs.get("KeyD"):
+    if inputs.get("d"):
         moveX += rightX * PLAYER_SPEED
         moveY += rightY * PLAYER_SPEED
 
@@ -181,6 +188,7 @@ def update(state, inputs):
 
     state.playerX = newX
     state.playerY = newY
+    state.prev_inputs = inputs
     
 renderer = Renderer()
 state = GameState()
