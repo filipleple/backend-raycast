@@ -40,13 +40,25 @@ HOST = "127.0.0.1"
 PORT = 9000
 
 SPRITE_PATH  = os.path.join(os.path.dirname(__file__), '..', 'hatman.gif')
-NUM_MONSTERS = 3
+FRAMES_DIR   = os.path.join(os.path.dirname(__file__), '..', 'frames')
+NUM_MONSTERS = 0 # temporarily just show the players
+NUM_FRAMES   = 3
 
 
 @dataclass
 class Monster:
     x: float
     y: float
+
+
+def load_frame_images(frames_dir):
+    images = []
+    if os.path.isdir(frames_dir):
+        for fname in sorted(os.listdir(frames_dir)):
+            if fname.lower().endswith('.gif'):
+                img = Image.open(os.path.join(frames_dir, fname)).convert("RGBA")
+                images.append(img)
+    return images
 
 
 class WorldState:
@@ -66,6 +78,17 @@ class WorldState:
             Monster((c + 0.5) * self.tile_size, (r + 0.5) * self.tile_size)
             for c, r in empty_cells[:NUM_MONSTERS]
         ]
+
+        frame_images = load_frame_images(FRAMES_DIR)
+        self.frame_cells = {}  # (col, row) -> PIL RGB Image
+        if frame_images:
+            wall_cells = [
+                (c, r) for r in range(self.rows) for c in range(self.cols)
+                if self.grid[r][c] == WALL
+            ]
+            random.shuffle(wall_cells)
+            for c, r in wall_cells[:NUM_FRAMES]:
+                self.frame_cells[(c, r)] = random.choice(frame_images).convert("RGB")
 
 
 class PlayerState:
@@ -103,8 +126,8 @@ class Renderer:
         if player.show_map:
             self.draw_wall_map(draw, world)
 
-        distances, sides = self.cast_fov_on_state(player, world)
-        self.render_panes(draw, distances, FOV_ANGLE, world.tile_size)
+        distances, sides, uvs, cells = self.cast_fov_on_state(player, world)
+        self.render_panes(draw, pil_img, distances, uvs, cells, FOV_ANGLE, world)
         self.render_sprites(pil_img, player, world, distances, others)
 
         return pil_img
@@ -133,9 +156,9 @@ class Renderer:
             world.grid, world.cols, world.rows, world.tile_size,
             player.playerX, player.playerY, player.cam_angle,
             FOV_ANGLE, NUM_RAYS,
-        )
+        )  # -> dists, sides, uvs, cells
 
-    def render_panes(self, draw, distances, fov_angle, tile_size):
+    def render_panes(self, draw, pil_img, distances, uvs, cells, fov_angle, world):
         pane_width = WIDTH / NUM_RAYS
         fov        = radians(fov_angle)
         proj_plane = (WIDTH / 2) / tan(fov / 2)
@@ -145,28 +168,39 @@ class Renderer:
             dist   = distances[i] * cos(offset)  # fish-eye correction
             if dist <= 0.0001 or dist == float("inf"):
                 continue
-            pane_height = min((tile_size / dist) * proj_plane, HEIGHT)
-            y    = HEIGHT / 2 - pane_height / 2
-            rect = (pane_x, y, pane_x + int(pane_width) + 1, y + pane_height)
-            draw.rectangle(rect, outline=PANE_COLOR)
+            pane_height = min((world.tile_size / dist) * proj_plane, HEIGHT)
+            y     = int(HEIGHT / 2 - pane_height / 2)
+            pw    = int(pane_width) + 1
+            ph    = int(pane_height)
+
+            frame_img = world.frame_cells.get(cells[i])
+            if frame_img:
+                # sample one texture column at the hit UV, stretch to pane size
+                tex_x  = int(uvs[i] * frame_img.width) % frame_img.width
+                strip  = frame_img.crop((tex_x, 0, tex_x + 1, frame_img.height))
+                strip  = strip.resize((pw, ph), Image.NEAREST)
+                pil_img.paste(strip, (pane_x, y))
+            else:
+                rect = (pane_x, y, pane_x + pw, y + ph)
+                draw.rectangle(rect, outline=PANE_COLOR)
 
     def render_sprites(self, pil_img, player, world, distances, others=()):
         fov        = radians(FOV_ANGLE)
         proj_plane = (WIDTH / 2) / tan(fov / 2)
 
-        # collect all sprite positions: monsters + other players
-        positions = (
-            [(m.x, m.y) for m in world.monsters] +
-            [(p.playerX, p.playerY) for p in others]
+        # collect all sprites as (x, y, image) — monsters + other players
+        sprites = (
+            [(m.x, m.y, self.hatman) for m in world.monsters] +
+            [(p.playerX, p.playerY, self.hatman) for p in others]
         )
 
         # paint farthest first so near sprites overdraw far ones
-        positions.sort(
+        sprites.sort(
             key=lambda s: math.hypot(s[0] - player.playerX, s[1] - player.playerY),
             reverse=True,
         )
 
-        for sx, sy in positions:
+        for sx, sy, img in sprites:
             dx   = sx - player.playerX
             dy   = sy - player.playerY
             dist = math.hypot(dx, dy)
@@ -186,7 +220,7 @@ class Renderer:
             draw_x   = screen_x - sprite_w // 2
             draw_y   = HEIGHT // 2 - sprite_h // 2
 
-            scaled = self.hatman.resize((sprite_w, sprite_h), Image.NEAREST)
+            scaled = img.resize((sprite_w, sprite_h), Image.NEAREST)
 
             for col in range(sprite_w):
                 screen_col = draw_x + col

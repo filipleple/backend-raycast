@@ -5,7 +5,7 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy, WALL=1):
     mapY = int(oy // tile_size)
 
     if 0 <= mapX < cols and 0 <= mapY < rows and grid[mapY][mapX] == WALL:
-        return True, 0.0, None
+        return True, 0.0, None, 0.0, mapX, mapY
 
     if dx == 0:
         stepX = 0
@@ -44,8 +44,13 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy, WALL=1):
             side = 1
 
         if mapX < 0 or mapX >= cols or mapY < 0 or mapY >= rows:
-            return False, inf, side
+            return False, inf, side, 0.0, mapX, mapY
 
         if grid[mapY][mapX] == WALL:
             dist = sideDistX - deltaDistX if side == 0 else sideDistY - deltaDistY
-            return True, dist, side
+            # UV: fractional position along the wall face that was hit
+            if side == 0:
+                u = (oy + dist * dy) / tile_size % 1.0
+            else:
+                u = (ox + dist * dx) / tile_size % 1.0
+            return True, dist, side, u, mapX, mapY
