@@ -95,7 +95,7 @@ class Renderer:
         self.height = height
         self.hatman = Image.open(SPRITE_PATH).convert("RGBA")
 
-    def render(self, player, world):
+    def render(self, player, world, others=()):
         img     = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         pil_img = Image.fromarray(img, mode="RGB")
         draw    = ImageDraw.Draw(pil_img)
@@ -105,7 +105,7 @@ class Renderer:
 
         distances, sides = self.cast_fov_on_state(player, world)
         self.render_panes(draw, distances, FOV_ANGLE, world.tile_size)
-        self.render_sprites(pil_img, player, world, distances)
+        self.render_sprites(pil_img, player, world, distances, others)
 
         return pil_img
 
@@ -150,20 +150,25 @@ class Renderer:
             rect = (pane_x, y, pane_x + int(pane_width) + 1, y + pane_height)
             draw.rectangle(rect, outline=PANE_COLOR)
 
-    def render_sprites(self, pil_img, player, world, distances):
+    def render_sprites(self, pil_img, player, world, distances, others=()):
         fov        = radians(FOV_ANGLE)
         proj_plane = (WIDTH / 2) / tan(fov / 2)
 
+        # collect all sprite positions: monsters + other players
+        positions = (
+            [(m.x, m.y) for m in world.monsters] +
+            [(p.playerX, p.playerY) for p in others]
+        )
+
         # paint farthest first so near sprites overdraw far ones
-        sorted_monsters = sorted(
-            world.monsters,
-            key=lambda m: math.hypot(m.x - player.playerX, m.y - player.playerY),
+        positions.sort(
+            key=lambda s: math.hypot(s[0] - player.playerX, s[1] - player.playerY),
             reverse=True,
         )
 
-        for monster in sorted_monsters:
-            dx   = monster.x - player.playerX
-            dy   = monster.y - player.playerY
+        for sx, sy in positions:
+            dx   = sx - player.playerX
+            dy   = sy - player.playerY
             dist = math.hypot(dx, dy)
             if dist < 0.1:
                 continue
@@ -273,7 +278,9 @@ def handle_client(conn):
                 except ConnectionError:
                     break
                 update(player, world, inputs)
-                pil_img = renderer.render(player, world)
+                with lock:
+                    others = [p for p in players if p is not player]
+                pil_img = renderer.render(player, world, others)
                 png     = renderer.encode_png(pil_img)
                 send_frame(conn, png)
     finally:
