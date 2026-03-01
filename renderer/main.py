@@ -1,4 +1,5 @@
 import socket
+import math
 from protocol import recv_json, send_frame
 from math import cos, tan, radians
 from mapgen import generate_map
@@ -26,6 +27,7 @@ PANE_COLOR = RED
 FOV_ANGLE = 60
 NUM_RAYS = 120
 PLAYER_SPEED = 10
+TURN_SPEED = 0.1
 
 # Protocol settings
 HOST = "127.0.0.1"
@@ -106,18 +108,49 @@ class GameState:
         self.cam_angle = 0.0
         self.playerX, self.playerY = 0,0
 
+
 def update(state, inputs):
-    if (inputs.get("ArrowLeft")):
-        state.playerX -= PLAYER_SPEED
-    if (inputs.get("ArrowRight")):
-        state.playerX += PLAYER_SPEED
-    if (inputs.get("ArrowUp")):
-        state.playerY -= PLAYER_SPEED
-    if (inputs.get("ArrowDown")):
-        state.playerY += PLAYER_SPEED
-    
-    #     if event.type == pygame.MOUSEWHEEL:
-    #         state.cam_angle += event.y*0.1
+    # --- turning ---
+    if inputs.get("ArrowLeft"):
+        state.cam_angle -= TURN_SPEED
+    if inputs.get("ArrowRight"):
+        state.cam_angle += TURN_SPEED
+
+    # --- direction vectors from angle ---
+    dirX = math.cos(state.cam_angle)
+    dirY = math.sin(state.cam_angle)
+
+    # perpendicular (strafe)
+    rightX = -dirY
+    rightY =  dirX
+
+    moveX = 0.0
+    moveY = 0.0
+
+    # --- forward/back ---
+    if inputs.get("ArrowUp"):
+        moveX += dirX * PLAYER_SPEED
+        moveY += dirY * PLAYER_SPEED
+    if inputs.get("ArrowDown"):
+        moveX -= dirX * PLAYER_SPEED
+        moveY -= dirY * PLAYER_SPEED
+
+    # --- strafe (example: A/D) ---
+    if inputs.get("KeyA"):
+        moveX -= rightX * PLAYER_SPEED
+        moveY -= rightY * PLAYER_SPEED
+    if inputs.get("KeyD"):
+        moveX += rightX * PLAYER_SPEED
+        moveY += rightY * PLAYER_SPEED
+
+    # optional: normalize diagonal movement so it stays at PLAYER_SPEED
+    mag = math.hypot(moveX, moveY)
+    if mag > 0:
+        moveX = moveX / mag * PLAYER_SPEED
+        moveY = moveY / mag * PLAYER_SPEED
+
+    state.playerX += moveX
+    state.playerY += moveY
 
     state.cam_angle = state.cam_angle % 360
     
