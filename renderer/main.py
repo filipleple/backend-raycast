@@ -12,6 +12,7 @@ import io
 WIDTH, HEIGHT = 800, 800
 WALL = 1
 EMPTY = 0
+GRID_SIZE = 100
 
 # Colors
 WHITE = (255, 255, 255)
@@ -102,7 +103,7 @@ class Renderer:
 
 class GameState:
     def __init__(self):
-        self.cols, self.rows = 8, 8
+        self.cols, self.rows = WIDTH/GRID_SIZE, HEIGHT/GRID_SIZE
         self.tile_size = min(WIDTH // self.cols, HEIGHT // self.rows)
         self.grid = generate_map(self.cols, self.rows, fill=0.35, seed=None)
         self.cam_angle = 0.0

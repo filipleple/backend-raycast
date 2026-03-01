@@ -14,3 +14,5 @@
 * a game where two players control one character, and they want to get it into
   two different goal posts? with a clever map (maybe with some common objectives
   to unlock each goal) this could work similarly to a tic tac toe game
+
+* add collisions, and doors that take you to new grids
