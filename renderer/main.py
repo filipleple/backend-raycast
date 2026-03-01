@@ -1,5 +1,8 @@
+import os
 import socket
 import math
+import random
+from dataclasses import dataclass
 from protocol import recv_json, send_frame
 from math import cos, tan, radians
 from mapgen import generate_map
@@ -35,10 +38,19 @@ PLAYER_MARGIN = 8  # collision radius in pixels
 HOST = "127.0.0.1"
 PORT = 9000
 
+SPRITE_PATH = os.path.join(os.path.dirname(__file__), '..', 'hatman.gif')
+NUM_MONSTERS = 3
+
+@dataclass
+class Monster:
+    x: float
+    y: float
+
 class Renderer:
     def __init__(self, width=WIDTH, height=HEIGHT):
         self.width = width
         self.height = height
+        self.hatman = Image.open(SPRITE_PATH).convert("RGBA")
 
     def render(self, state):
         img = np.zeros((self.height, self.width, 3), dtype=np.uint8)
@@ -52,6 +64,7 @@ class Renderer:
 
         distances, sides = self.cast_fov_on_state(state)
         self.render_panes(draw, distances, FOV_ANGLE, state.tile_size)
+        self.render_sprites(pil_img, state, distances)
 
         return pil_img
 
@@ -104,6 +117,61 @@ class Renderer:
             rect = (pane_x, y, pane_x + int(pane_width) + 1, y + pane_height)
             draw.rectangle(rect, outline=PANE_COLOR)
 
+    def render_sprites(self, pil_img, state, distances):
+        fov = radians(FOV_ANGLE)
+        proj_plane = (WIDTH / 2) / tan(fov / 2)
+
+        # paint farthest first so near sprites overdraw far ones
+        sorted_monsters = sorted(
+            state.monsters,
+            key=lambda m: math.hypot(m.x - state.playerX, m.y - state.playerY),
+            reverse=True,
+        )
+
+        for monster in sorted_monsters:
+            dx = monster.x - state.playerX
+            dy = monster.y - state.playerY
+            dist = math.hypot(dx, dy)
+            if dist < 0.1:
+                continue
+
+            # angle to monster relative to camera direction, normalised to (-π, π)
+            sprite_angle = math.atan2(dy, dx) - state.cam_angle
+            sprite_angle = (sprite_angle + math.pi) % (2 * math.pi) - math.pi
+
+            # cull anything clearly outside the FOV
+            if abs(sprite_angle) > fov / 2 + 0.2:
+                continue
+
+            sprite_h = int((state.tile_size / dist) * proj_plane)
+            sprite_h = max(1, min(sprite_h, HEIGHT))
+            sprite_w = sprite_h  # square billboard
+
+            screen_x = int((sprite_angle / fov + 0.5) * WIDTH)
+            draw_x = screen_x - sprite_w // 2
+            draw_y = HEIGHT // 2 - sprite_h // 2
+
+            scaled = self.hatman.resize((sprite_w, sprite_h), Image.NEAREST)
+
+            for col in range(sprite_w):
+                screen_col = draw_x + col
+                if not (0 <= screen_col < WIDTH):
+                    continue
+
+                # ray index for this screen column
+                ray_i = int(screen_col / WIDTH * NUM_RAYS)
+                ray_i = max(0, min(NUM_RAYS - 1, ray_i))
+
+                # fish-eye corrected perpendicular wall distance at this column
+                offset = (ray_i / (NUM_RAYS - 1) - 0.5) * fov
+                perp_wall = distances[ray_i] * cos(offset)
+
+                if dist >= perp_wall:
+                    continue  # wall is closer, skip
+
+                strip = scaled.crop((col, 0, col + 1, sprite_h))
+                pil_img.paste(strip, (screen_col, draw_y), strip)
+
 class GameState:
     def __init__(self):
         self.show_map = False
@@ -124,6 +192,16 @@ class GameState:
         col, row = best
         self.playerX = (col + 0.5) * self.tile_size
         self.playerY = (row + 0.5) * self.tile_size
+
+        empty_cells = [
+            (c, r) for r in range(self.rows) for c in range(self.cols)
+            if self.grid[r][c] == EMPTY and (c, r) != (col, row)
+        ]
+        random.shuffle(empty_cells)
+        self.monsters = [
+            Monster((c + 0.5) * self.tile_size, (r + 0.5) * self.tile_size)
+            for c, r in empty_cells[:NUM_MONSTERS]
+        ]
 
 
 def update(state, inputs):
