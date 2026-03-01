@@ -29,6 +29,7 @@ FOV_ANGLE = 60
 NUM_RAYS = 120
 PLAYER_SPEED = 10
 TURN_SPEED = 0.1
+PLAYER_MARGIN = 8  # collision radius in pixels
 
 # Protocol settings
 HOST = "127.0.0.1"
@@ -103,11 +104,22 @@ class Renderer:
 
 class GameState:
     def __init__(self):
-        self.cols, self.rows = WIDTH/GRID_SIZE, HEIGHT/GRID_SIZE
+        self.cols, self.rows = WIDTH//GRID_SIZE, HEIGHT//GRID_SIZE
         self.tile_size = min(WIDTH // self.cols, HEIGHT // self.rows)
         self.grid = generate_map(self.cols, self.rows, fill=0.35, seed=None)
         self.cam_angle = 0.0
-        self.playerX, self.playerY = 0,0
+        # find empty cell closest to (0,0) to avoid spawning inside a wall
+        best, best_dist = None, float('inf')
+        for row in range(self.rows):
+            for col in range(self.cols):
+                if self.grid[row][col] == EMPTY:
+                    dist = math.hypot(col, row)
+                    if dist < best_dist:
+                        best_dist = dist
+                        best = (col, row)
+        col, row = best
+        self.playerX = (col + 0.5) * GRID_SIZE
+        self.playerY = (row + 0.5) * GRID_SIZE
 
 
 def update(state, inputs):
@@ -150,10 +162,24 @@ def update(state, inputs):
         moveX = moveX / mag * PLAYER_SPEED
         moveY = moveY / mag * PLAYER_SPEED
 
-    state.playerX += moveX
-    state.playerY += moveY
+    newX = state.playerX + moveX
+    newY = state.playerY + moveY
 
-    state.cam_angle = state.cam_angle % 360
+    # axis-split collision: check X and Y independently for wall sliding
+    if moveX != 0:
+        cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / GRID_SIZE)
+        cy = int(state.playerY / GRID_SIZE)
+        if not (0 <= cx < state.cols and 0 <= cy < state.rows) or state.grid[cy][cx] == WALL:
+            newX = state.playerX
+
+    if moveY != 0:
+        cx = int(newX / GRID_SIZE)
+        cy = int((newY + math.copysign(PLAYER_MARGIN, moveY)) / GRID_SIZE)
+        if not (0 <= cx < state.cols and 0 <= cy < state.rows) or state.grid[cy][cx] == WALL:
+            newY = state.playerY
+
+    state.playerX = newX
+    state.playerY = newY
     
 renderer = Renderer()
 state = GameState()
