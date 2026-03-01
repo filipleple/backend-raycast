@@ -19,8 +19,10 @@ EMPTY     = 0
 GRID_SIZE = 50
 
 # Colors
-GREY = (200, 200, 200)
-RED  = (255, 0, 0)
+GREY    = (200, 200, 200)
+RED     = (255, 0, 0)
+BROWN   = (100,  60,  20)   # connectivity door on minimap
+MAGENTA = (220,   0, 220)   # portal door on minimap
 
 # Object colors
 WALL_COLOR = GREY
@@ -48,7 +50,6 @@ DOOR_TEXTURE_PATH = os.path.join(ASSETS, 'textures', 'door', 'door.gif')
 NUM_MONSTERS = 0
 NUM_FRAMES   = 3
 
-# Cardinal directions
 DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
 
@@ -64,10 +65,23 @@ class Monster:
 
 @dataclass
 class Door:
+    """Same-map connectivity door — teleports between two exits on one map."""
     col: int
     row: int
-    exit_a: tuple  # pixel-space (x, y) on one side
-    exit_b: tuple  # pixel-space (x, y) on the other side
+    exit_a: tuple
+    exit_b: tuple
+
+
+class PortalDoor:
+    """Cross-map door — leads to a different map with a different wall texture.
+    Target map is generated lazily on first use.
+    """
+    def __init__(self, col, row, exit_pos):
+        self.col        = col
+        self.row        = row
+        self.exit_pos   = exit_pos  # pixel (x, y) on THIS map (where player stands)
+        self.target_map = None      # set on first use
+        self.target_pos = None      # pixel (x, y) spawn on target map
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +100,7 @@ def load_frame_images(frames_dir):
 
 def load_wall_textures(textures_dir):
     """Load textures/walls/*.gif alphabetically → wall type 1, 2, 3…
-    wall.gif is type 1 (the default).
+    Returns the full registry; each Map picks one type to use.
     """
     textures  = {}
     walls_dir = os.path.join(textures_dir, 'walls')
@@ -98,13 +112,28 @@ def load_wall_textures(textures_dir):
 
 
 # ---------------------------------------------------------------------------
-# Region connectivity + door placement
+# Helpers
+# ---------------------------------------------------------------------------
+
+def find_spawn(m):
+    """Pixel (x, y) of the empty cell closest to grid origin."""
+    best, best_dist = None, float('inf')
+    for row in range(m.rows):
+        for col in range(m.cols):
+            if m.grid[row][col] == EMPTY:
+                dist = math.hypot(col, row)
+                if dist < best_dist:
+                    best_dist = dist
+                    best = (col, row)
+    col, row = best
+    return (col + 0.5) * m.tile_size, (row + 0.5) * m.tile_size
+
+
+# ---------------------------------------------------------------------------
+# Region connectivity + same-map door placement
 # ---------------------------------------------------------------------------
 
 def flood_fill_regions(grid, cols, rows):
-    """BFS flood-fill: returns (region_of, num_regions).
-    region_of: {(col, row) -> region_id} for every empty cell.
-    """
     region_of = {}
     count = 0
     for r in range(rows):
@@ -127,17 +156,11 @@ def flood_fill_regions(grid, cols, rows):
 
 
 def find_doors(grid, cols, rows, tile_size):
-    """Return door_cells: {(col, row) -> Door} connecting all empty regions.
-
-    Phase 1: wall cells directly adjacent to 2+ regions (single-wall gaps).
-    Phase 2: BFS through walls for regions separated by thick barriers.
-    Uses union-find to stop as soon as everything is one component.
-    """
+    """Return door_cells {(col, row) -> Door} that connect all empty regions."""
     region_of, num_regions = flood_fill_regions(grid, cols, rows)
     if num_regions <= 1:
         return {}
 
-    # --- union-find ---
     parent = list(range(num_regions))
 
     def find(x):
@@ -158,7 +181,7 @@ def find_doors(grid, cols, rows, tile_size):
 
     door_cells = {}
 
-    # --- Phase 1: single-wall doors ---
+    # Phase 1: single-wall doors
     borders = []
     for r in range(rows):
         for c in range(cols):
@@ -184,59 +207,50 @@ def find_doors(grid, cols, rows, tile_size):
         if all_connected():
             return door_cells
 
-    # --- Phase 2: BFS through walls for thick-wall separations ---
+    # Phase 2: BFS through walls for thick-wall separations
     while not all_connected():
-        # group regions into components
-        comp_members = {}  # component_root -> list of region ids
+        comp_members = {}
         for i in range(num_regions):
             comp_members.setdefault(find(i), []).append(i)
+        roots    = list(comp_members)
+        root_a   = roots[0]
+        root_b   = next(r for r in roots if r != root_a)
 
-        comp_roots = list(comp_members)
-        root_a = comp_roots[0]
-        root_b = next(r for r in comp_roots if r != root_a)
-
-        # collect all empty cells belonging to component A as BFS seeds
         seeds = [cell for cell, rid in region_of.items() if find(rid) == root_a]
-
-        prev = {cell: None for cell in seeds}
-        q = deque(seeds)
+        prev  = {cell: None for cell in seeds}
+        q     = deque(seeds)
         target = None
 
         while q and target is None:
             cc, rr = q.popleft()
             for dc, dr in DIRS:
                 nc, nr = cc + dc, rr + dr
-                if not (0 <= nc < cols and 0 <= nr < rows):
-                    continue
-                if (nc, nr) in prev:
+                if not (0 <= nc < cols and 0 <= nr < rows) or (nc, nr) in prev:
                     continue
                 prev[(nc, nr)] = (cc, rr)
                 q.append((nc, nr))
-                # stop as soon as we reach any cell in component B
                 cell_rid = region_of.get((nc, nr))
                 if cell_rid is not None and find(cell_rid) == root_b:
                     target = (nc, nr)
                     break
 
         if target is None:
-            break  # genuinely unreachable (shouldn't happen with a walled border)
+            break
 
-        # trace path back → find the first wall cell coming from component A
         path = []
         cur = target
         while cur is not None:
             path.append(cur)
             cur = prev[cur]
-        path.reverse()  # now: comp_A empty → ... → wall ... → comp_B empty
+        path.reverse()
 
         exit_a_cell = None
         door_pos    = None
-        exit_b_cell = target
 
         for i, (cc, rr) in enumerate(path):
             if grid[rr][cc] != EMPTY:
-                door_pos     = (cc, rr)
-                exit_a_cell  = path[i - 1] if i > 0 else None
+                door_pos    = (cc, rr)
+                exit_a_cell = path[i - 1] if i > 0 else None
                 break
 
         if door_pos and exit_a_cell:
@@ -244,9 +258,9 @@ def find_doors(grid, cols, rows, tile_size):
             door_cells[door_pos] = Door(dc, dr,
                 exit_a=((exit_a_cell[0] + 0.5) * tile_size,
                         (exit_a_cell[1] + 0.5) * tile_size),
-                exit_b=((exit_b_cell[0] + 0.5) * tile_size,
-                        (exit_b_cell[1] + 0.5) * tile_size))
-            union(region_of[exit_a_cell], region_of[exit_b_cell])
+                exit_b=((target[0] + 0.5) * tile_size,
+                        (target[1] + 0.5) * tile_size))
+            union(region_of[exit_a_cell], region_of[target])
 
     return door_cells
 
@@ -256,35 +270,42 @@ def find_doors(grid, cols, rows, tile_size):
 # ---------------------------------------------------------------------------
 
 class Map:
-    """A self-contained room: layout, textures, and entities.
+    """A self-contained room.
 
-    grid values:  0 = empty,  1/2/3… = wall type (indexes wall_textures)
-
-    Doors: stored in door_cells, separate from the grid so the raycaster
-    sees them as normal walls. Pressing space while facing one teleports
-    the player to the exit on the opposite side.
-
-    To add a new room: call build_map() with different wall_textures and
-    link rooms together by populating .doors on each Map.
+    wall_type:         which key in all_wall_textures this map uses.
+    wall_textures:     {1: PIL Image} — only the chosen texture, keyed as 1.
+    door_cells:        same-map connectivity doors.
+    portal_door_cells: cross-map portal doors (one per map).
     """
-    def __init__(self, cols, rows, tile_size, grid,
-                 wall_textures, door_texture, monsters, frame_cells, door_cells):
-        self.cols          = cols
-        self.rows          = rows
-        self.tile_size     = tile_size
-        self.grid          = grid
-        self.wall_textures = wall_textures  # {wall_type int: PIL Image}
-        self.door_texture  = door_texture   # PIL Image | None
-        self.monsters      = monsters
-        self.frame_cells   = frame_cells    # {(col, row): PIL Image}
-        self.door_cells    = door_cells     # {(col, row): Door}
+    def __init__(self, cols, rows, tile_size, grid, wall_type,
+                 wall_textures, door_texture, monsters, frame_cells,
+                 door_cells, portal_door_cells):
+        self.cols              = cols
+        self.rows              = rows
+        self.tile_size         = tile_size
+        self.grid              = grid
+        self.wall_type         = wall_type
+        self.wall_textures     = wall_textures
+        self.door_texture      = door_texture
+        self.monsters          = monsters
+        self.frame_cells       = frame_cells
+        self.door_cells        = door_cells
+        self.portal_door_cells = portal_door_cells
 
 
-def build_map(wall_textures):
+def build_map(all_wall_textures, exclude_type=None):
+    """Generate a new map, picking a random wall texture different from exclude_type."""
     cols      = WIDTH  // GRID_SIZE
     rows      = HEIGHT // GRID_SIZE
     tile_size = min(WIDTH // cols, HEIGHT // rows)
     grid      = generate_map(cols, rows, fill=0.35, seed=None)
+
+    # pick wall texture
+    available = [t for t in all_wall_textures if t != exclude_type]
+    if not available:
+        available = list(all_wall_textures.keys())
+    wall_type     = random.choice(available) if available else None
+    map_textures  = {1: all_wall_textures[wall_type]} if wall_type else {}
 
     # entities
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
@@ -303,51 +324,62 @@ def build_map(wall_textures):
         for c, r in wall_cells[:NUM_FRAMES]:
             frame_cells[(c, r)] = random.choice(frame_images).convert("RGB")
 
-    # doors
+    # same-map connectivity doors
     door_cells = find_doors(grid, cols, rows, tile_size)
 
+    # door texture
     door_texture = None
     if os.path.isfile(DOOR_TEXTURE_PATH):
         door_texture = Image.open(DOOR_TEXTURE_PATH).convert("RGB")
 
-    return Map(cols, rows, tile_size, grid,
-               wall_textures, door_texture, monsters, frame_cells, door_cells)
+    # portal door: one wall cell with at least one empty neighbour,
+    # not already used as a connectivity door or picture frame
+    used = set(door_cells) | set(frame_cells)
+    portal_candidates = []
+    for r in range(rows):
+        for c in range(cols):
+            if grid[r][c] != EMPTY and (c, r) not in used:
+                for dc, dr in DIRS:
+                    nc, nr = c + dc, r + dr
+                    if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc] == EMPTY:
+                        portal_candidates.append((c, r, nc, nr))
+                        break
+    portal_door_cells = {}
+    if portal_candidates:
+        pc, pr, ec, er = random.choice(portal_candidates)
+        exit_pos = ((ec + 0.5) * tile_size, (er + 0.5) * tile_size)
+        portal_door_cells[(pc, pr)] = PortalDoor(pc, pr, exit_pos)
+
+    return Map(cols, rows, tile_size, grid, wall_type,
+               map_textures, door_texture, monsters, frame_cells,
+               door_cells, portal_door_cells)
 
 
 # ---------------------------------------------------------------------------
-# World — shared across all connected players
+# World
 # ---------------------------------------------------------------------------
 
 class WorldState:
-    """Holds all maps. Generated once by the first player to connect."""
+    """Holds all maps and the full wall-texture registry.
+    New maps are appended when players traverse portal doors.
+    """
     def __init__(self):
-        wall_textures = load_wall_textures(TEXTURES_DIR)
-        self.maps     = [build_map(wall_textures)]
+        self.all_wall_textures = load_wall_textures(TEXTURES_DIR)
+        self.maps              = [build_map(self.all_wall_textures)]
 
 
 # ---------------------------------------------------------------------------
-# Player — one instance per connection
+# Player
 # ---------------------------------------------------------------------------
 
 class PlayerState:
     def __init__(self, world):
+        self.world       = world
         self.current_map = world.maps[0]
         self.cam_angle   = 0.0
         self.show_map    = False
         self.prev_inputs = {}
-
-        m = self.current_map
-        best, best_dist = None, float('inf')
-        for row in range(m.rows):
-            for col in range(m.cols):
-                if m.grid[row][col] == EMPTY:
-                    dist = math.hypot(col, row)
-                    if dist < best_dist:
-                        best_dist = dist
-                        best = (col, row)
-        col, row     = best
-        self.playerX = (col + 0.5) * m.tile_size
-        self.playerY = (row + 0.5) * m.tile_size
+        self.playerX, self.playerY = find_spawn(self.current_map)
 
 
 # ---------------------------------------------------------------------------
@@ -383,11 +415,19 @@ class Renderer:
     def draw_wall_map(self, draw, m):
         for y in range(m.rows):
             for x in range(m.cols):
-                if m.grid[y][x] != EMPTY:
-                    rect = (x * m.tile_size, y * m.tile_size,
-                            (x + 1) * m.tile_size, (y + 1) * m.tile_size)
-                    fill = (100, 60, 20) if (x, y) in m.door_cells else WALL_COLOR
-                    draw.rectangle(rect, fill=fill)
+                if m.grid[y][x] == EMPTY:
+                    continue
+                if (x, y) in m.portal_door_cells:
+                    fill = MAGENTA
+                elif (x, y) in m.door_cells:
+                    fill = BROWN
+                else:
+                    fill = WALL_COLOR
+                draw.rectangle(
+                    (x * m.tile_size, y * m.tile_size,
+                     (x + 1) * m.tile_size, (y + 1) * m.tile_size),
+                    fill=fill,
+                )
 
     def cast_fov(self, player, m):
         return cast_fov(m.grid, m.cols, m.rows, m.tile_size,
@@ -412,8 +452,8 @@ class Renderer:
             ph = int(pane_height)
             cx, cy = cells[i]
 
-            # texture priority: door > picture frame > wall texture > solid
-            if (cx, cy) in m.door_cells:
+            # texture priority: portal door = connectivity door > picture frame > wall > solid
+            if (cx, cy) in m.portal_door_cells or (cx, cy) in m.door_cells:
                 tex = m.door_texture
             else:
                 tex = m.frame_cells.get((cx, cy))
@@ -434,7 +474,8 @@ class Renderer:
 
         sprites = (
             [(mon.x, mon.y, self.hatman) for mon in m.monsters] +
-            [(p.playerX, p.playerY, self.hatman) for p in others]
+            [(p.playerX, p.playerY, self.hatman)
+             for p in others if p.current_map is m]
         )
         sprites.sort(
             key=lambda s: math.hypot(s[0] - player.playerX, s[1] - player.playerY),
@@ -496,24 +537,34 @@ def update(player, inputs):
     if inputs.get("m") and not player.prev_inputs.get("m"):
         player.show_map = not player.show_map
 
-    # --- door interaction: space bar ---
+    # --- door / portal interaction ---
     if inputs.get(" ") and not player.prev_inputs.get(" "):
-        # look one cell ahead along camera direction
-        look_x = player.playerX + dirX * m.tile_size * 0.7
-        look_y = player.playerY + dirY * m.tile_size * 0.7
+        look_x   = player.playerX + dirX * m.tile_size * 0.7
+        look_y   = player.playerY + dirY * m.tile_size * 0.7
         look_col = int(look_x / m.tile_size)
         look_row = int(look_y / m.tile_size)
-        door = m.door_cells.get((look_col, look_row))
-        if door:
-            # determine which side the player is on and send them through
-            our_col = int(player.playerX / m.tile_size)
-            our_row = int(player.playerY / m.tile_size)
-            exit_a_col = int(door.exit_a[0] / m.tile_size)
-            exit_a_row = int(door.exit_a[1] / m.tile_size)
+
+        conn_door = m.door_cells.get((look_col, look_row))
+        if conn_door:
+            our_col    = int(player.playerX / m.tile_size)
+            our_row    = int(player.playerY / m.tile_size)
+            exit_a_col = int(conn_door.exit_a[0] / m.tile_size)
+            exit_a_row = int(conn_door.exit_a[1] / m.tile_size)
             if (our_col, our_row) == (exit_a_col, exit_a_row):
-                player.playerX, player.playerY = door.exit_b
+                player.playerX, player.playerY = conn_door.exit_b
             else:
-                player.playerX, player.playerY = door.exit_a
+                player.playerX, player.playerY = conn_door.exit_a
+
+        portal = m.portal_door_cells.get((look_col, look_row))
+        if portal:
+            if portal.target_map is None:
+                new_map             = build_map(player.world.all_wall_textures,
+                                                exclude_type=m.wall_type)
+                portal.target_map   = new_map
+                portal.target_pos   = find_spawn(new_map)
+                player.world.maps.append(new_map)
+            player.current_map             = portal.target_map
+            player.playerX, player.playerY = portal.target_pos
 
     if inputs.get("ArrowUp"):
         moveX += dirX * PLAYER_SPEED;  moveY += dirY * PLAYER_SPEED
@@ -529,10 +580,12 @@ def update(player, inputs):
         moveX = moveX / mag * PLAYER_SPEED
         moveY = moveY / mag * PLAYER_SPEED
 
+    # collision uses current_map, which may have just changed via portal
+    m    = player.current_map
     newX = player.playerX + moveX
     newY = player.playerY + moveY
+    ts   = m.tile_size
 
-    ts = m.tile_size
     if moveX != 0:
         cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / ts)
         cy = int(player.playerY / ts)
