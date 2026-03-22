@@ -1,58 +1,250 @@
 <!DOCTYPE html>
 <html>
-<body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#000">
+<head>
+  <meta charset="UTF-8">
+  <title>raycast</title>
+  <style>
+    body {
+      background: #000080;
+      color: #ffffff;
+      font-family: "Comic Sans MS", "Courier New", monospace;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 32px 16px;
+      margin: 0;
+    }
 
-<canvas id="screen" width="640" height="480"></canvas>
+    h1 { margin: 0 0 4px 0; font-size: 2em; letter-spacing: 2px; }
+    h2 { margin: 0 0 12px 0; font-size: 1em; font-weight: normal; }
+
+    hr { border: 1px dashed #aaaaff; width: 100%; margin: 16px 0; }
+
+    .panel {
+      border: 2px solid #aaaaff;
+      padding: 20px 24px;
+      width: 320px;
+      background: #000050;
+    }
+
+    .panel h3 { margin: 0 0 12px 0; font-size: 1em; text-transform: uppercase; letter-spacing: 1px; }
+
+    input[type="text"],
+    input[type="password"],
+    input[type="file"] {
+      width: 100%;
+      box-sizing: border-box;
+      background: #000020;
+      border: 1px solid #aaaaff;
+      color: #ffffff;
+      padding: 6px 8px;
+      font-family: inherit;
+      font-size: 0.9em;
+      margin-bottom: 8px;
+    }
+
+    button {
+      background: #0000aa;
+      border: 2px outset #aaaaff;
+      color: #ffffff;
+      font-family: inherit;
+      font-size: 0.9em;
+      padding: 6px 16px;
+      cursor: pointer;
+      margin-top: 4px;
+      margin-right: 6px;
+    }
+    button:active { border-style: inset; }
+    button.danger  { background: #660000; border-color: #ff8888; }
+    button.success { background: #005500; border-color: #88ff88; }
+
+    .toggle-link {
+      color: #aaaaff;
+      cursor: pointer;
+      font-size: 0.85em;
+      text-decoration: underline;
+      display: inline-block;
+      margin-top: 10px;
+    }
+
+    .msg { font-size: 0.85em; margin-top: 8px; min-height: 1.2em; }
+    .msg.err { color: #ff8888; }
+    .msg.ok  { color: #88ff88; }
+
+    #avatar-img {
+      display: block;
+      width: 80px;
+      height: 80px;
+      object-fit: cover;
+      border: 2px solid #aaaaff;
+      margin-bottom: 12px;
+      image-rendering: pixelated;
+    }
+
+    #no-avatar { font-size: 0.8em; color: #aaaaaa; margin-bottom: 12px; }
+
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
+
+    #guest-panel, #user-panel { display: none; }
+    #register-form { display: none; }
+  </style>
+</head>
+<body>
+
+  <h1>&#x25A0; RAYCAST</h1>
+  <h2>multiplayer raycasting game</h2>
+  <hr>
+
+  <!-- logged out -->
+  <div id="guest-panel">
+    <div class="panel">
+
+      <!-- login -->
+      <div id="login-form">
+        <h3>login</h3>
+        <input id="login-user" type="text" placeholder="username">
+        <input id="login-pass" type="password" placeholder="password">
+        <button onclick="login()">log in</button>
+        <div id="login-msg" class="msg"></div>
+        <span class="toggle-link" onclick="showForm('register')">no account? register</span>
+      </div>
+
+      <!-- register -->
+      <div id="register-form">
+        <h3>register</h3>
+        <input id="reg-user" type="text" placeholder="username">
+        <input id="reg-pass" type="password" placeholder="password">
+        <button onclick="register()">register</button>
+        <div id="reg-msg" class="msg"></div>
+        <span class="toggle-link" onclick="showForm('login')">already have an account? log in</span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- logged in -->
+  <div id="user-panel">
+    <div class="panel">
+      <h3>welcome, <span id="uname"></span></h3>
+      <hr>
+
+      <img id="avatar-img" src="/avatar" onerror="this.style.display='none'; document.getElementById('no-avatar').style.display='block'">
+      <div id="no-avatar" style="display:none">no avatar set</div>
+
+      <h3>upload avatar</h3>
+      <input id="avatar-file" type="file" accept="image/png,image/gif">
+      <button onclick="uploadAvatar()">upload</button>
+      <div id="avatar-msg" class="msg"></div>
+
+      <hr>
+
+      <div class="actions">
+        <a href="/game.html"><button class="success">&#x25BA; join game</button></a>
+        <button class="danger" onclick="logout()">log out</button>
+      </div>
+      <div id="logout-msg" class="msg"></div>
+    </div>
+  </div>
 
 <script>
-const canvas = document.getElementById("screen");
-const ctx = canvas.getContext("2d");
+  function showForm(which) {
+    document.getElementById("login-form").style.display    = which === "login"    ? "block" : "none";
+    document.getElementById("register-form").style.display = which === "register" ? "block" : "none";
+    document.getElementById("login-msg").textContent = "";
+    document.getElementById("reg-msg").textContent   = "";
+  }
 
-fetch("/me").then(res => {
+  async function init() {
+    const res = await fetch("/me");
     if (!res.ok) {
-        ctx.fillStyle = "white";
-        ctx.font = "20px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("not logged in — go to /menu.html", canvas.width / 2, canvas.height / 2);
-        return;
+      showForm("login");
+      document.getElementById("guest-panel").style.display = "block";
+      return;
     }
-    startGame();
-});
+    const data = await res.json();
+    const username = data.message.replace("you are logged in as: ", "");
+    document.getElementById("uname").textContent = username;
+    document.getElementById("user-panel").style.display = "block";
+  }
 
-function startGame() {
-    const inputState = {};
-    const ws = new WebSocket("ws://localhost:8080/ws");
-    ws.binaryType = "blob";
-
-    window.addEventListener("keydown", (e) => {
-        inputState[e.key] = true;
+  async function login() {
+    const msg = document.getElementById("login-msg");
+    const res = await fetch("/login", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("login-user").value,
+        password: document.getElementById("login-pass").value,
+      }),
     });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error;
+      msg.className = "msg err";
+      return;
+    }
+    window.location.reload();
+  }
 
-    window.addEventListener("keyup", (e) => {
-        inputState[e.key] = false;
+  async function register() {
+    const msg = document.getElementById("reg-msg");
+    const res = await fetch("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        username: document.getElementById("reg-user").value,
+        password: document.getElementById("reg-pass").value,
+      }),
     });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error;
+      msg.className = "msg err";
+      return;
+    }
+    msg.textContent = data.message + " — you can now log in";
+    msg.className = "msg ok";
+    showForm("login");
+  }
 
-    setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(inputState));
-        }
-    }, 50);
+  async function logout() {
+    const msg = document.getElementById("logout-msg");
+    const res = await fetch("/logout", { method: "POST" });
+    if (!res.ok) {
+      const data = await res.json();
+      msg.textContent = data.error;
+      msg.className = "msg err";
+      return;
+    }
+    window.location.reload();
+  }
 
-    ws.onmessage = async (event) => {
-        const blob = event.data;
-        const bitmap = await createImageBitmap(blob);
-        ctx.drawImage(bitmap, 0, 0);
-    };
+  async function uploadAvatar() {
+    const msg = document.getElementById("avatar-msg");
+    const file = document.getElementById("avatar-file").files[0];
+    if (!file) {
+      msg.textContent = "pick a file first";
+      msg.className = "msg err";
+      return;
+    }
+    const form = new FormData();
+    form.append("avatar", file);
+    const res = await fetch("/avatar/upload", { method: "POST", body: form });
+    const data = await res.json();
+    if (!res.ok) {
+      msg.textContent = data.error;
+      msg.className = "msg err";
+      return;
+    }
+    msg.textContent = data.message;
+    msg.className = "msg ok";
+    const img = document.getElementById("avatar-img");
+    img.style.display = "block";
+    document.getElementById("no-avatar").style.display = "none";
+    img.src = "/avatar?t=" + Date.now();
+  }
 
-    ws.onclose = () => {
-        ctx.fillStyle = "black";
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = "white";
-        ctx.font = "20px monospace";
-        ctx.textAlign = "center";
-        ctx.fillText("disconnected", canvas.width / 2, canvas.height / 2);
-    };
-}
+  init();
 </script>
 </body>
 </html>
