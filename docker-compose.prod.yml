@@ -1,0 +1,13 @@
+services:
+  db:
+    restart: unless-stopped
+
+  py-renderer:
+    image: ghcr.io/${GHCR_USER}/raycast-py-renderer:latest
+    restart: unless-stopped
+
+  go-backend:
+    image: ghcr.io/${GHCR_USER}/raycast-go-backend:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:18080:8080"

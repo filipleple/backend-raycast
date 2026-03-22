@@ -25,7 +25,9 @@ fetch("/me").then(res => {
 
 function startGame() {
     const inputState = {};
-    const ws = new WebSocket("ws://localhost:8080/ws");
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${proto}://${location.host}${location.pathname.replace(/\/[^/]*$/, "/ws")}`;
+    const ws = new WebSocket(wsUrl);
     ws.binaryType = "arraybuffer";
 
     window.addEventListener("keydown", (e) => {
