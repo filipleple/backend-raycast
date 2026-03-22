@@ -36,7 +36,7 @@ TURN_SPEED    = 0.1
 PLAYER_MARGIN = 8  # collision radius in pixels
 
 # Protocol settings
-HOST = "127.0.0.1"
+HOST = "0.0.0.0"
 PORT = 9000
 
 # Asset paths
