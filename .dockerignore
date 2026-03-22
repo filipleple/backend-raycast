@@ -1,0 +1,6 @@
+venv/
+.git/
+*.md
+db/
+Dockerfile*
+docker-compose.yml
