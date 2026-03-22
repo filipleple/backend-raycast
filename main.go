@@ -2,7 +2,6 @@ package main
 
 import (
 	"database/sql"
-	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
 

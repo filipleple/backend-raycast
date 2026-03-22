@@ -5,7 +5,7 @@ import random
 import threading
 from collections import deque
 from dataclasses import dataclass
-from protocol import recv_json, send_frame
+from protocol import recv_json, send_frame, recv_binary
 from math import cos, tan, radians
 from mapgen import generate_map
 from fov import cast_fov
