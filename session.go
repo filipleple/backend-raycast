@@ -15,7 +15,9 @@ type Session struct {
 	mu    sync.RWMutex
 	input map[string]bool
 
-	done chan struct{}
+	done     chan struct{}
+	userID   int
+	username string
 }
 
 func (s *Session) tickLoop() {
@@ -38,7 +40,7 @@ func (s *Session) tickLoop() {
 		}
 		s.mu.RUnlock()
 
-		png, err := s.pyConn.SendInput(snapshot)
+		png, err := s.pyConn.SendInput(InputMessage{PlayerID: s.userID, Keys: snapshot})
 		if err != nil {
 			return
 		}

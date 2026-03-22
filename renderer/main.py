@@ -373,12 +373,14 @@ class WorldState:
 # ---------------------------------------------------------------------------
 
 class PlayerState:
-    def __init__(self, world):
+    def __init__(self, world, player_id=0, avatar=None):
         self.world       = world
         self.current_map = world.maps[0]
         self.cam_angle   = 0.0
         self.show_map    = False
         self.prev_inputs = {}
+        self.player_id   = player_id
+        self.avatar      = avatar  # PIL Image or None; falls back to hatman
         self.playerX, self.playerY = find_spawn(self.current_map)
 
 
@@ -474,7 +476,7 @@ class Renderer:
 
         sprites = (
             [(mon.x, mon.y, self.hatman) for mon in m.monsters] +
-            [(p.playerX, p.playerY, self.hatman)
+            [(p.playerX, p.playerY, p.avatar if p.avatar is not None else self.hatman)
              for p in others if p.current_map is m]
         )
         sprites.sort(
@@ -615,19 +617,37 @@ lock     = threading.Lock()
 
 def handle_client(conn):
     global world
+
+    # --- handshake ---
+    try:
+        handshake    = recv_json(conn)
+        avatar_bytes = recv_binary(conn)
+    except ConnectionError:
+        conn.close()
+        return
+
+    player_id = handshake.get("player_id", 0)
+    avatar    = None
+    if avatar_bytes:
+        try:
+            avatar = Image.open(io.BytesIO(avatar_bytes)).convert("RGBA")
+        except Exception:
+            pass  # bad image data; fall back to hatman
+
     with lock:
         if world is None:
             world = WorldState()
-        player = PlayerState(world)
+        player = PlayerState(world, player_id=player_id, avatar=avatar)
         players.append(player)
+
     try:
         with conn:
             while True:
                 try:
-                    inputs = recv_json(conn)
+                    msg = recv_json(conn)
                 except ConnectionError:
                     break
-                update(player, inputs)
+                update(player, msg.get("keys", {}))
                 with lock:
                     others = [p for p in players if p is not player]
                 pil_img = renderer.render(player, others)
