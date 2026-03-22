@@ -341,23 +341,6 @@ func uploadAvatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	})
 }
 
-func meHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use GET"})
-		return
-	}
-
-	user, err := getUserBySessionCookie(db, r)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, MessageResponse{
-		Message: fmt.Sprintf("you are logged in as: %s", user.Username),
-	})
-}
-
 func avatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if r.Method != http.MethodGet {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use GET"})
@@ -488,6 +471,23 @@ func loginHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 }
 
+func meHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use GET"})
+		return
+	}
+
+	user, err := getUserBySessionCookie(db, r)
+	if err != nil {
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, MessageResponse{
+		Message: fmt.Sprintf("you are logged in as: %s", user.Username),
+	})
+}
+
 func logoutHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if r.Method != http.MethodPost {
 		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
@@ -496,20 +496,25 @@ func logoutHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	defer r.Body.Close()
 
-	token, err := getSessionToken(r)
+	user, err := getUserBySessionCookie(db, r)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
 		return
 	}
 
+	token, _ := getSessionToken(r)
 	if err := terminateSession(db, token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "session creation failed"})
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "logout failed"})
 		return
 	}
 
-	writeJSON(w, http.StatusOK, MessageResponse{
-		Message: fmt.Sprintf("logged out successfully"),
-	})
+	activeSessionsMu.Lock()
+	if s, ok := activeSessions[user.ID]; ok && s != nil {
+		s.wsConn.Close()
+	}
+	activeSessionsMu.Unlock()
+
+	writeJSON(w, http.StatusOK, MessageResponse{Message: "logged out successfully"})
 }
 
 func unregisterHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {

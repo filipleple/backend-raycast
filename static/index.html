@@ -8,34 +8,51 @@
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
 
-const inputState = {};
-const ws = new WebSocket("ws://localhost:8080/ws");
-ws.binaryType = "blob";
-
-
-window.addEventListener("keydown", (e) => {
-    inputState[e.key] = true;
-});
-
-window.addEventListener("keyup", (e) => {
-    inputState[e.key] = false;
-});
-
-setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(inputState));
+fetch("/me").then(res => {
+    if (!res.ok) {
+        ctx.fillStyle = "white";
+        ctx.font = "20px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("not logged in", canvas.width / 2, canvas.height / 2);
+        return;
     }
-}, 50); // 20Hz
+    startGame();
+});
 
-// ---- rendering handling ----
-ws.onmessage = async (event) => {
-    const blob = event.data;
-    const bitmap = await createImageBitmap(blob);
-    ctx.drawImage(bitmap, 0, 0);
-};
+function startGame() {
+    const inputState = {};
+    const ws = new WebSocket("ws://localhost:8080/ws");
+    ws.binaryType = "blob";
 
+    window.addEventListener("keydown", (e) => {
+        inputState[e.key] = true;
+    });
 
+    window.addEventListener("keyup", (e) => {
+        inputState[e.key] = false;
+    });
 
+    setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify(inputState));
+        }
+    }, 50);
+
+    ws.onmessage = async (event) => {
+        const blob = event.data;
+        const bitmap = await createImageBitmap(blob);
+        ctx.drawImage(bitmap, 0, 0);
+    };
+
+    ws.onclose = () => {
+        ctx.fillStyle = "black";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "white";
+        ctx.font = "20px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("disconnected", canvas.width / 2, canvas.height / 2);
+    };
+}
 </script>
 </body>
 </html>

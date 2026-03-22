@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
@@ -12,6 +13,11 @@ import (
 var upgrader = websocket.Upgrader{
 	CheckOrigin: func(r *http.Request) bool { return true },
 }
+
+var (
+	activeSessionsMu sync.Mutex
+	activeSessions   = map[int]*Session{}
+)
 
 func main() {
 	db := connectPostgresDB()
@@ -36,6 +42,9 @@ func main() {
 	http.HandleFunc("/avatar", func(w http.ResponseWriter, r *http.Request) {
 		avatarHandle(w, r, db)
 	})
+	http.HandleFunc("/me", func(w http.ResponseWriter, r *http.Request) {
+		meHandle(w, r, db)
+	})
 
 	//game routes
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
@@ -53,6 +62,21 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
 		return
 	}
+
+	activeSessionsMu.Lock()
+	if _, alreadyIn := activeSessions[user.ID]; alreadyIn {
+		activeSessionsMu.Unlock()
+		writeJSON(w, http.StatusConflict, ErrorResponse{Error: "already connected"})
+		return
+	}
+	activeSessions[user.ID] = nil // reserve slot
+	activeSessionsMu.Unlock()
+
+	defer func() {
+		activeSessionsMu.Lock()
+		delete(activeSessions, user.ID)
+		activeSessionsMu.Unlock()
+	}()
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -84,6 +108,10 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		userID:   user.ID,
 		username: user.Username,
 	}
+
+	activeSessionsMu.Lock()
+	activeSessions[user.ID] = session
+	activeSessionsMu.Unlock()
 
 	session.Start()
 }
