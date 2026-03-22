@@ -26,7 +26,7 @@ fetch("/me").then(res => {
 function startGame() {
     const inputState = {};
     const ws = new WebSocket("ws://localhost:8080/ws");
-    ws.binaryType = "blob";
+    ws.binaryType = "arraybuffer";
 
     window.addEventListener("keydown", (e) => {
         inputState[e.key] = true;
@@ -42,10 +42,9 @@ function startGame() {
         }
     }, 50);
 
-    ws.onmessage = async (event) => {
-        const blob = event.data;
-        const bitmap = await createImageBitmap(blob);
-        ctx.drawImage(bitmap, 0, 0);
+    ws.onmessage = (event) => {
+        const imageData = new ImageData(new Uint8ClampedArray(event.data), 640, 480);
+        ctx.putImageData(imageData, 0, 0);
     };
 
     ws.onclose = () => {

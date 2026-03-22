@@ -21,7 +21,7 @@ type Session struct {
 }
 
 func (s *Session) tickLoop() {
-	ticker := time.NewTicker(50 * time.Millisecond)
+	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	defer s.Cleanup()
 

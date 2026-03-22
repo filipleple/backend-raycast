@@ -409,10 +409,8 @@ class Renderer:
 
         return pil_img
 
-    def encode_png(self, pil_img):
-        buf = io.BytesIO()
-        pil_img.save(buf, format="PNG")
-        return buf.getvalue()
+    def encode_raw(self, pil_img):
+        return pil_img.convert("RGBA").tobytes()
 
     def draw_wall_map(self, draw, m):
         for y in range(m.rows):
@@ -651,8 +649,8 @@ def handle_client(conn):
                 with lock:
                     others = [p for p in players if p is not player]
                 pil_img = renderer.render(player, others)
-                png     = renderer.encode_png(pil_img)
-                send_frame(conn, png)
+                raw     = renderer.encode_raw(pil_img)
+                send_frame(conn, raw)
     finally:
         with lock:
             players.remove(player)
