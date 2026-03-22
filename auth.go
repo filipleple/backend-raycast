@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	_ "github.com/lib/pq"
 )
@@ -114,7 +115,11 @@ func checkPassword(hash, password string) bool {
 //
 
 func connectPostgresDB() *sql.DB {
-	connString := "user=myuser dbname=myapp password=strongpassword host=127.0.0.1 port=5432 sslmode=disable"
+	// allow overriding the database URL
+	connString := os.Getenv("DATABASE_URL")
+	if connString == "" {
+		connString = "user=myuser dbname=myapp password=strongpassword host=localhost port=5432 sslmode=disable"
+	}
 
 	db, err := sql.Open("postgres", connString)
 	if err != nil {

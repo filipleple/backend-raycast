@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
 	"sync"
 
 	"github.com/gorilla/websocket"
@@ -84,7 +85,12 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	pythonClient, err := NewPythonClient("127.0.0.1:9000")
+	// allow hosting the renderer at different addresses
+	pyAddr := os.Getenv("RENDERER_ADDR")
+	if pyAddr == "" {
+		pyAddr = "127.0.0.1:9000"
+	}
+	pythonClient, err := NewPythonClient(pyAddr)
 	if err != nil {
 		ws.Close()
 		return
