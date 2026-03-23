@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"log"
 	"sync"
 	"time"
 
@@ -54,6 +55,7 @@ func (s *Session) tickLoop() {
 }
 
 func (s *Session) Start() {
+	log.Println("starting a player session")
 	go s.readWS()
 	s.tickLoop()
 }

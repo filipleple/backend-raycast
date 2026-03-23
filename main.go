@@ -90,8 +90,10 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	if pyAddr == "" {
 		pyAddr = "127.0.0.1:9000"
 	}
+	log.Println("connecting to the renderer at: ", pyAddr)
 	pythonClient, err := NewPythonClient(pyAddr)
 	if err != nil {
+		log.Println("connecting to the renderer failed")
 		ws.Close()
 		return
 	}

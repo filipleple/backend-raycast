@@ -120,6 +120,7 @@ func connectPostgresDB() *sql.DB {
 	if connString == "" {
 		connString = "user=myuser dbname=myapp password=strongpassword host=localhost port=5432 sslmode=disable"
 	}
+	log.Println("connecting to the database at: ", connString)
 
 	db, err := sql.Open("postgres", connString)
 	if err != nil {

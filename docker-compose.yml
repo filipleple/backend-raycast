@@ -17,6 +17,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.py
+    environment:
+      - PYTHONUNBUFFERED=1
 
   go-backend:
     build:

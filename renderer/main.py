@@ -12,6 +12,7 @@ from fov import cast_fov
 from PIL import Image, ImageDraw
 import numpy as np
 import io
+import logging
 
 # Window settings
 WIDTH, HEIGHT = 640, 480
@@ -657,6 +658,7 @@ def handle_client(conn):
 
 
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    logging.info("attempting websocket connection at: "+str(HOST)+":"+str(PORT))
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((HOST, PORT))
     s.listen()
