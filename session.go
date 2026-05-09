@@ -46,8 +46,9 @@ func (s *Session) tickLoop() {
 			return
 		}
 
-		//single writer: only tickLoop writes
+		s.wsConn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
 		err = s.wsConn.WriteMessage(websocket.BinaryMessage, png)
+		s.wsConn.SetWriteDeadline(time.Time{})
 		if err != nil {
 			return
 		}
