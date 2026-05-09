@@ -34,6 +34,18 @@ services:
         condition: service_healthy
       py-renderer:
         condition: service_started
+  caddy:
+    image: caddy:latest
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
 
 volumes:
   db-data:
+  caddy_data:
+  caddy_config:
