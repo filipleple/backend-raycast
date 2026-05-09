@@ -28,7 +28,7 @@ function startGame() {
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const wsUrl = `${proto}://${location.host}${location.pathname.replace(/\/[^/]*$/, "/ws")}`;
     const ws = new WebSocket(wsUrl);
-    ws.binaryType = "arraybuffer";
+    ws.binaryType = "blob";
 
     window.addEventListener("keydown", (e) => {
         inputState[e.key] = true;
@@ -44,9 +44,10 @@ function startGame() {
         }
     }, 50);
 
-    ws.onmessage = (event) => {
-        const imageData = new ImageData(new Uint8ClampedArray(event.data), 640, 480);
-        ctx.putImageData(imageData, 0, 0);
+    ws.onmessage = async (event) => {
+        const bitmap = await createImageBitmap(event.data);
+        ctx.drawImage(bitmap, 0, 0);
+        bitmap.close();
     };
 
     ws.onclose = () => {
