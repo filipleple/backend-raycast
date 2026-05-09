@@ -15,7 +15,7 @@ import io
 import logging
 
 # Window settings
-WIDTH, HEIGHT = 640, 480
+WIDTH, HEIGHT = 320, 240
 EMPTY     = 0
 GRID_SIZE = 50
 
