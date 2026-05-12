@@ -157,6 +157,23 @@ def flood_fill_regions(grid, cols, rows):
     return region_of, count
 
 
+def make_csv_doors(door_positions, grid, cols, rows, tile_size):
+    """Build Door objects from pre-identified '2' cells in the CSV."""
+    door_cells = {}
+    for c, r in door_positions:
+        exits = []
+        for dc, dr in DIRS:
+            nc, nr = c + dc, r + dr
+            if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc] == EMPTY:
+                exits.append((nc, nr))
+        if len(exits) >= 2:
+            ca, cb = exits[0], exits[1]
+            door_cells[(c, r)] = Door(c, r,
+                exit_a=((ca[0] + 0.5) * tile_size, (ca[1] + 0.5) * tile_size),
+                exit_b=((cb[0] + 0.5) * tile_size, (cb[1] + 0.5) * tile_size))
+    return door_cells
+
+
 def find_doors(grid, cols, rows, tile_size):
     """Return door_cells {(col, row) -> Door} that connect all empty regions."""
     region_of, num_regions = flood_fill_regions(grid, cols, rows)
@@ -301,8 +318,7 @@ def build_map(all_wall_textures, exclude_type=None):
     cols = 19
     rows = 14
     tile_size = min(WIDTH // cols, HEIGHT // rows)
-    # grid = generate_map(cols, rows, fill=0.35, seed=None)
-    grid = load_map(cols, rows)
+    grid, door_positions = load_map(cols, rows)
 
     # pick wall texture
     available = [t for t in all_wall_textures if t != exclude_type]
@@ -329,7 +345,7 @@ def build_map(all_wall_textures, exclude_type=None):
             frame_cells[(c, r)] = random.choice(frame_images).convert("RGB")
 
     # same-map connectivity doors
-    door_cells = find_doors(grid, cols, rows, tile_size)
+    door_cells = make_csv_doors(door_positions, grid, cols, rows, tile_size)
 
     # door texture
     door_texture = None

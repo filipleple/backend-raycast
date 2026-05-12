@@ -5,8 +5,9 @@ import os
 ASSETS            = os.path.join(os.path.dirname(__file__), '..')
 MAP_PATH          = os.path.join(ASSETS, 'map.csv')
 
-WALL = 1
 EMPTY = 0
+WALL = 1
+DOOR = 1
 
 def generate_map(cols, rows, fill=0.3, seed=None):
     rng = random.Random(seed)
@@ -22,11 +23,16 @@ def generate_map(cols, rows, fill=0.3, seed=None):
 
 def load_map(cols, rows):
     grid = list(csv.reader(open(MAP_PATH)))
+    door_positions = []
 
     for y in range(rows):
         for x in range(cols):
-            if int(grid[y][x]) == 1:
+            val = int(grid[y][x])
+            if val == 2:
+                door_positions.append((x, y))
+                grid[y][x] = WALL
+            elif val == 1:
                 grid[y][x] = WALL
             else:
                 grid[y][x] = EMPTY
-    return grid
+    return grid, door_positions
