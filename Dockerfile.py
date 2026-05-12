@@ -5,6 +5,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY renderer/ ./renderer/
 COPY hatman.gif .
 COPY map.csv .
+COPY definitions.csv .
 COPY frames/ ./frames/
 COPY textures/ ./textures/
 WORKDIR /app/renderer

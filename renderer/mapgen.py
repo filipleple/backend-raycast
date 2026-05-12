@@ -3,16 +3,29 @@ import csv
 import os
 import math
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-ASSETS   = os.path.join(os.path.dirname(__file__), '..')
-MAP_PATH = os.path.join(ASSETS, 'map.csv')
+ASSETS           = os.path.join(os.path.dirname(__file__), '..')
+MAP_PATH         = os.path.join(ASSETS, 'map.csv')
+DEFINITIONS_PATH = os.path.join(ASSETS, 'definitions.csv')
 
+# kept for generate_map (procedural path)
 EMPTY = 0
 WALL  = 1
-DOOR  = 2
 
 DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
+
+
+@dataclass
+class Symbol:
+    id:           str
+    symbol:       str
+    texture_name: str
+    transparency: bool
+    walk_through: bool
+    wall:         bool
+    floor:        bool
+    door:         bool
 
 
 @dataclass
@@ -31,12 +44,64 @@ class PortalDoor:
     def __init__(self, col, row, exit_pos):
         self.col        = col
         self.row        = row
-        self.exit_pos   = exit_pos  # pixel (x, y) on THIS map (where player stands)
-        self.target_map = None      # set on first use
-        self.target_pos = None      # pixel (x, y) spawn on target map
+        self.exit_pos   = exit_pos
+        self.target_map = None
+        self.target_pos = None
+
+
+def load_definitions():
+    """Return {symbol_str: Symbol} from definitions.csv."""
+    defs = {}
+    with open(DEFINITIONS_PATH, newline='') as f:
+        for row in csv.DictReader(f):
+            sym = Symbol(
+                id=row['id'],
+                symbol=row['symbol'],
+                texture_name=row['texture_name'],
+                transparency=row['transparency'] == '1',
+                walk_through=row['walk_through'] == '1',
+                wall=row['wall'] == '1',
+                floor=row['floor'] == '1',
+                door=row['door'] == '1',
+            )
+            defs[row['symbol']] = sym
+    return defs
+
+
+_FALLBACK_FLOOR = Symbol(
+    id='', symbol='', texture_name='',
+    transparency=True, walk_through=True,
+    wall=False, floor=True, door=False,
+)
+
+
+def load_map():
+    """Load map.csv using definitions.csv.
+
+    Returns (grid, door_positions, cols, rows) where grid is [[Symbol]].
+    Unknown symbols are treated as floor.
+    """
+    defs = load_definitions()
+    raw  = list(csv.reader(open(MAP_PATH)))
+    rows = len(raw)
+    cols = next((i for i, v in enumerate(raw[0]) if v.strip() == ''), len(raw[0]))
+
+    door_positions = []
+    grid = []
+    for y in range(rows):
+        row = []
+        for x in range(cols):
+            val = raw[y][x].strip()
+            sym = defs.get(val, _FALLBACK_FLOOR)
+            if sym.door:
+                door_positions.append((x, y))
+            row.append(sym)
+        grid.append(row)
+    return grid, door_positions, cols, rows
 
 
 def generate_map(cols, rows, fill=0.3, seed=None):
+    """Procedural int grid — kept for future use."""
     rng  = random.Random(seed)
     grid = [[EMPTY for _ in range(cols)] for _ in range(rows)]
     for y in range(rows):
@@ -48,39 +113,16 @@ def generate_map(cols, rows, fill=0.3, seed=None):
     return grid
 
 
-def load_map():
-    raw  = list(csv.reader(open(MAP_PATH)))
-    rows = len(raw)
-    cols = next((i for i, v in enumerate(raw[0]) if v.strip() == ''), len(raw[0]))
-
-    door_positions = []
-    grid = []
-    for y in range(rows):
-        row = []
-        for x in range(cols):
-            val = int(raw[y][x])
-            if val == DOOR:
-                door_positions.append((x, y))
-                row.append(WALL)
-            elif val == 1:
-                row.append(WALL)
-            else:
-                row.append(EMPTY)
-        grid.append(row)
-    return grid, door_positions, cols, rows
-
-
 def find_spawn(m):
     """Pixel (x, y) of the empty cell closest to grid origin."""
     best, best_dist = None, float('inf')
     for row in range(m.rows):
         for col in range(m.cols):
-            if m.grid[row][col] == EMPTY:
+            if m.grid[row][col].floor:
                 dist = math.hypot(col, row)
                 if dist < best_dist:
                     best_dist = dist
                     best      = (col, row)
-    col, row = best
     return (3 + 0.5) * m.tile_size, (3 + 0.5) * m.tile_size
 
 
@@ -89,7 +131,7 @@ def flood_fill_regions(grid, cols, rows):
     count     = 0
     for r in range(rows):
         for c in range(cols):
-            if grid[r][c] == EMPTY and (c, r) not in region_of:
+            if grid[r][c].floor and (c, r) not in region_of:
                 q = deque([(c, r)])
                 while q:
                     cc, rr = q.popleft()
@@ -99,7 +141,7 @@ def flood_fill_regions(grid, cols, rows):
                     for dc, dr in DIRS:
                         nc, nr = cc + dc, rr + dr
                         if 0 <= nc < cols and 0 <= nr < rows \
-                                and grid[nr][nc] == EMPTY \
+                                and grid[nr][nc].floor \
                                 and (nc, nr) not in region_of:
                             q.append((nc, nr))
                 count += 1
@@ -107,13 +149,13 @@ def flood_fill_regions(grid, cols, rows):
 
 
 def make_csv_doors(door_positions, grid, cols, rows, tile_size):
-    """Build Door objects from pre-identified '2' cells in the CSV."""
+    """Build Door objects from cells marked door=1 in definitions."""
     door_cells = {}
     for c, r in door_positions:
         exits = []
         for dc, dr in DIRS:
             nc, nr = c + dc, r + dr
-            if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc] == EMPTY:
+            if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc].floor:
                 exits.append((nc, nr))
         if len(exits) >= 2:
             ca, cb = exits[0], exits[1]
@@ -149,11 +191,10 @@ def find_doors(grid, cols, rows, tile_size):
 
     door_cells = {}
 
-    # Phase 1: single-wall doors
     borders = []
     for r in range(rows):
         for c in range(cols):
-            if grid[r][c] != EMPTY:
+            if not grid[r][c].floor:
                 adj = {}
                 for dc, dr in DIRS:
                     nc, nr = c + dc, r + dr
@@ -175,7 +216,6 @@ def find_doors(grid, cols, rows, tile_size):
         if all_connected():
             return door_cells
 
-    # Phase 2: BFS through walls for thick-wall separations
     while not all_connected():
         comp_members = {}
         for i in range(num_regions):
@@ -216,7 +256,7 @@ def find_doors(grid, cols, rows, tile_size):
         door_pos    = None
 
         for i, (cc, rr) in enumerate(path):
-            if grid[rr][cc] != EMPTY:
+            if not grid[rr][cc].floor:
                 door_pos    = (cc, rr)
                 exit_a_cell = path[i - 1] if i > 0 else None
                 break

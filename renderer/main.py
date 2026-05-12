@@ -6,9 +6,7 @@ import threading
 from dataclasses import dataclass
 from protocol import recv_json, send_frame, recv_binary
 from math import cos, tan, radians
-from mapgen import (generate_map, load_map, find_spawn,
-                    flood_fill_regions, find_doors, make_csv_doors,
-                    Door, PortalDoor, DIRS)
+from mapgen import load_map, find_spawn, make_csv_doors, Door, PortalDoor
 from fov import cast_fov
 from PIL import Image, ImageDraw
 import numpy as np
@@ -17,14 +15,12 @@ import logging
 
 # Window settings
 WIDTH, HEIGHT = 320, 240
-EMPTY     = 0
-GRID_SIZE = 50
 
 # Colors
 GREY    = (200, 200, 200)
 RED     = (255, 0, 0)
 BROWN   = (100,  60,  20)   # connectivity door on minimap
-MAGENTA = (220,   0, 220)   # portal door on minimap
+MAGENTA = (220,   0, 220)   # reserved for portal doors
 
 # Object colors
 WALL_COLOR = GREY
@@ -46,7 +42,6 @@ ASSETS            = os.path.join(os.path.dirname(__file__), '..')
 SPRITE_PATH       = os.path.join(ASSETS, 'hatman.gif')
 FRAMES_DIR        = os.path.join(ASSETS, 'frames')
 TEXTURES_DIR      = os.path.join(ASSETS, 'textures')
-DOOR_TEXTURE_PATH = os.path.join(ASSETS, 'textures', 'doors', 'door.gif')
 
 # Entity counts per map
 NUM_MONSTERS = 0
@@ -76,18 +71,6 @@ def load_frame_images(frames_dir):
     return images
 
 
-def load_wall_textures(textures_dir):
-    """Load textures/walls/*.gif alphabetically → wall type 1, 2, 3…
-    Returns the full registry; each Map picks one type to use.
-    """
-    textures  = {}
-    walls_dir = os.path.join(textures_dir, 'walls')
-    if os.path.isdir(walls_dir):
-        fnames = sorted(f for f in os.listdir(walls_dir) if f.lower().endswith('.gif'))
-        for i, fname in enumerate(fnames, start=1):
-            textures[i] = Image.open(os.path.join(walls_dir, fname)).convert("RGB")
-    return textures
-
 
 # ---------------------------------------------------------------------------
 # Map
@@ -96,42 +79,44 @@ def load_wall_textures(textures_dir):
 class Map:
     """A self-contained room.
 
-    wall_type:         which key in all_wall_textures this map uses.
-    wall_textures:     {1: PIL Image} — only the chosen texture, keyed as 1.
+    textures:          {texture_name: PIL Image} loaded from definitions.
     door_cells:        same-map connectivity doors.
     portal_door_cells: cross-map portal doors (one per map).
     """
-    def __init__(self, cols, rows, tile_size, grid, wall_type,
-                 wall_textures, door_texture, monsters, frame_cells,
+    def __init__(self, cols, rows, tile_size, grid,
+                 textures, monsters, frame_cells,
                  door_cells, portal_door_cells):
         self.cols              = cols
         self.rows              = rows
         self.tile_size         = tile_size
         self.grid              = grid
-        self.wall_type         = wall_type
-        self.wall_textures     = wall_textures
-        self.door_texture      = door_texture
+        self.textures          = textures
         self.monsters          = monsters
         self.frame_cells       = frame_cells
         self.door_cells        = door_cells
         self.portal_door_cells = portal_door_cells
 
 
-def build_map(all_wall_textures, exclude_type=None):
-    """Generate a new map, picking a random wall texture different from exclude_type."""
+def build_map():
     grid, door_positions, cols, rows = load_map()
     tile_size = min(WIDTH // cols, HEIGHT // rows)
 
-    # pick wall texture
-    available = [t for t in all_wall_textures if t != exclude_type]
-    if not available:
-        available = list(all_wall_textures.keys())
-    wall_type     = random.choice(available) if available else None
-    map_textures  = {1: all_wall_textures[wall_type]} if wall_type else {}
+    # load textures by name from each symbol's texture_name field
+    textures = {}
+    seen = set()
+    for r in range(rows):
+        for c in range(cols):
+            sym = grid[r][c]
+            if not sym.texture_name or sym.texture_name in seen:
+                continue
+            seen.add(sym.texture_name)
+            subdir = 'doors' if sym.door else 'walls'
+            path   = os.path.join(TEXTURES_DIR, subdir, sym.texture_name + '.gif')
+            if os.path.isfile(path):
+                textures[sym.texture_name] = Image.open(path).convert("RGB")
 
-    # entities
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
-                   if grid[r][c] == EMPTY]
+                   if grid[r][c].floor]
     random.shuffle(empty_cells)
 
     monsters = [Monster((c + 0.5) * tile_size, (r + 0.5) * tile_size)
@@ -141,24 +126,16 @@ def build_map(all_wall_textures, exclude_type=None):
     frame_cells  = {}
     if frame_images:
         wall_cells = [(c, r) for r in range(rows) for c in range(cols)
-                      if grid[r][c] != EMPTY]
+                      if not grid[r][c].floor]
         random.shuffle(wall_cells)
         for c, r in wall_cells[:NUM_FRAMES]:
             frame_cells[(c, r)] = random.choice(frame_images).convert("RGB")
 
-    # same-map connectivity doors
     door_cells = make_csv_doors(door_positions, grid, cols, rows, tile_size)
 
-    # door texture
-    door_texture = None
-    if os.path.isfile(DOOR_TEXTURE_PATH):
-        door_texture = Image.open(DOOR_TEXTURE_PATH).convert("RGB")
-
-    portal_door_cells = {}
-
-    return Map(cols, rows, tile_size, grid, wall_type,
-               map_textures, door_texture, monsters, frame_cells,
-               door_cells, portal_door_cells)
+    return Map(cols, rows, tile_size, grid,
+               textures, monsters, frame_cells,
+               door_cells, {})
 
 
 # ---------------------------------------------------------------------------
@@ -166,12 +143,8 @@ def build_map(all_wall_textures, exclude_type=None):
 # ---------------------------------------------------------------------------
 
 class WorldState:
-    """Holds all maps and the full wall-texture registry.
-    New maps are appended when players traverse portal doors.
-    """
     def __init__(self):
-        self.all_wall_textures = load_wall_textures(TEXTURES_DIR)
-        self.maps              = [build_map(self.all_wall_textures)]
+        self.maps = [build_map()]
 
 
 # ---------------------------------------------------------------------------
@@ -223,11 +196,9 @@ class Renderer:
     def draw_wall_map(self, draw, m):
         for y in range(m.rows):
             for x in range(m.cols):
-                if m.grid[y][x] == EMPTY:
+                if m.grid[y][x].floor:
                     continue
-                if (x, y) in m.portal_door_cells:
-                    fill = MAGENTA
-                elif (x, y) in m.door_cells:
+                if (x, y) in m.door_cells:
                     fill = BROWN
                 else:
                     fill = WALL_COLOR
@@ -260,13 +231,9 @@ class Renderer:
             ph = int(pane_height)
             cx, cy = cells[i]
 
-            # texture priority: portal door = connectivity door > picture frame > wall > solid
-            if (cx, cy) in m.portal_door_cells or (cx, cy) in m.door_cells:
-                tex = m.door_texture
-            else:
-                tex = m.frame_cells.get((cx, cy))
-                if tex is None:
-                    tex = m.wall_textures.get(m.grid[cy][cx])
+            tex = m.frame_cells.get((cx, cy))
+            if tex is None:
+                tex = m.textures.get(m.grid[cy][cx].texture_name)
 
             if tex is not None:
                 tex_x = int(uvs[i] * tex.width) % tex.width
@@ -376,8 +343,7 @@ def update(player, inputs):
         portal = m.portal_door_cells.get((look_col, look_row))
         if portal:
             if portal.target_map is None:
-                new_map             = build_map(player.world.all_wall_textures,
-                                                exclude_type=m.wall_type)
+                new_map             = build_map()
                 portal.target_map   = new_map
                 portal.target_pos   = find_spawn(new_map)
                 player.world.maps.append(new_map)
@@ -407,13 +373,13 @@ def update(player, inputs):
     if moveX != 0:
         cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / ts)
         cy = int(player.playerY / ts)
-        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or m.grid[cy][cx] != EMPTY:
+        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].floor:
             newX = player.playerX
 
     if moveY != 0:
         cx = int(newX / ts)
         cy = int((newY + math.copysign(PLAYER_MARGIN, moveY)) / ts)
-        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or m.grid[cy][cx] != EMPTY:
+        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].floor:
             newY = player.playerY
 
     player.playerX     = newX
