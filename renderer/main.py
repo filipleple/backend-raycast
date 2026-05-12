@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from protocol import recv_json, send_frame, recv_binary
 from math import cos, tan, radians
 from mapgen import generate_map
+from mapgen import load_map
 from fov import cast_fov
 from PIL import Image, ImageDraw
 import numpy as np
@@ -127,7 +128,7 @@ def find_spawn(m):
                     best_dist = dist
                     best = (col, row)
     col, row = best
-    return (col + 0.5) * m.tile_size, (row + 0.5) * m.tile_size
+    return (3 + 0.5) * m.tile_size, (3 + 0.5) * m.tile_size
 
 
 # ---------------------------------------------------------------------------
@@ -296,10 +297,12 @@ class Map:
 
 def build_map(all_wall_textures, exclude_type=None):
     """Generate a new map, picking a random wall texture different from exclude_type."""
-    cols      = WIDTH  // GRID_SIZE
-    rows      = HEIGHT // GRID_SIZE
+    # original grid size: 6 x 4
+    cols = 19
+    rows = 14
     tile_size = min(WIDTH // cols, HEIGHT // rows)
-    grid      = generate_map(cols, rows, fill=0.35, seed=None)
+    # grid = generate_map(cols, rows, fill=0.35, seed=None)
+    grid = load_map(cols, rows)
 
     # pick wall texture
     available = [t for t in all_wall_textures if t != exclude_type]
