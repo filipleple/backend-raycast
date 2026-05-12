@@ -10,7 +10,7 @@ MAP_PATH = os.path.join(ASSETS, 'map.csv')
 
 EMPTY = 0
 WALL  = 1
-DOOR  = 1
+DOOR  = 2
 
 DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
@@ -54,7 +54,7 @@ def load_map(cols, rows):
     for y in range(rows):
         for x in range(cols):
             val = int(grid[y][x])
-            if val == 2:
+            if val == DOOR:
                 door_positions.append((x, y))
                 grid[y][x] = WALL
             elif val == 1:
