@@ -157,23 +157,7 @@ def build_map(all_wall_textures, exclude_type=None):
     if os.path.isfile(DOOR_TEXTURE_PATH):
         door_texture = Image.open(DOOR_TEXTURE_PATH).convert("RGB")
 
-    # portal door: one wall cell with at least one empty neighbour,
-    # not already used as a connectivity door or picture frame
-    used = set(door_cells) | set(frame_cells)
-    portal_candidates = []
-    for r in range(rows):
-        for c in range(cols):
-            if grid[r][c] != EMPTY and (c, r) not in used:
-                for dc, dr in DIRS:
-                    nc, nr = c + dc, r + dr
-                    if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc] == EMPTY:
-                        portal_candidates.append((c, r, nc, nr))
-                        break
     portal_door_cells = {}
-    if portal_candidates:
-        pc, pr, ec, er = random.choice(portal_candidates)
-        exit_pos = ((ec + 0.5) * tile_size, (er + 0.5) * tile_size)
-        portal_door_cells[(pc, pr)] = PortalDoor(pc, pr, exit_pos)
 
     return Map(cols, rows, tile_size, grid, wall_type,
                map_textures, door_texture, monsters, frame_cells,
