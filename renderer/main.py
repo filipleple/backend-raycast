@@ -355,13 +355,23 @@ def update(player, inputs):
         look_col = int(look_x / m.tile_size)
         look_row = int(look_y / m.tile_size)
 
-        conn_door = m.door_cells.get((look_col, look_row))
+        # sample along look direction at multiple depths — robust to approach
+        # angle and exact distance from the door
+        conn_door = None
+        for t in (0.3, 0.5, 0.7, 1.0, 1.3):
+            lc = int((player.playerX + dirX * m.tile_size * t) / m.tile_size)
+            lr = int((player.playerY + dirY * m.tile_size * t) / m.tile_size)
+            d  = m.door_cells.get((lc, lr))
+            if d:
+                conn_door = d
+                break
+
         if conn_door:
-            our_col    = int(player.playerX / m.tile_size)
-            our_row    = int(player.playerY / m.tile_size)
-            exit_a_col = int(conn_door.exit_a[0] / m.tile_size)
-            exit_a_row = int(conn_door.exit_a[1] / m.tile_size)
-            if (our_col, our_row) == (exit_a_col, exit_a_row):
+            dist_a = math.hypot(player.playerX - conn_door.exit_a[0],
+                                player.playerY - conn_door.exit_a[1])
+            dist_b = math.hypot(player.playerX - conn_door.exit_b[0],
+                                player.playerY - conn_door.exit_b[1])
+            if dist_a < dist_b:
                 player.playerX, player.playerY = conn_door.exit_b
             else:
                 player.playerX, player.playerY = conn_door.exit_a
