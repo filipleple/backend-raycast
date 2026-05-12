@@ -119,11 +119,8 @@ class Map:
 
 def build_map(all_wall_textures, exclude_type=None):
     """Generate a new map, picking a random wall texture different from exclude_type."""
-    # original grid size: 6 x 4
-    cols = 19
-    rows = 14
+    grid, door_positions, cols, rows = load_map()
     tile_size = min(WIDTH // cols, HEIGHT // rows)
-    grid, door_positions = load_map(cols, rows)
 
     # pick wall texture
     available = [t for t in all_wall_textures if t != exclude_type]

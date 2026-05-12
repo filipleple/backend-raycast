@@ -48,20 +48,26 @@ def generate_map(cols, rows, fill=0.3, seed=None):
     return grid
 
 
-def load_map(cols, rows):
-    grid           = list(csv.reader(open(MAP_PATH)))
+def load_map():
+    raw  = list(csv.reader(open(MAP_PATH)))
+    rows = len(raw)
+    cols = next((i for i, v in enumerate(raw[0]) if v.strip() == ''), len(raw[0]))
+
     door_positions = []
+    grid = []
     for y in range(rows):
+        row = []
         for x in range(cols):
-            val = int(grid[y][x])
+            val = int(raw[y][x])
             if val == DOOR:
                 door_positions.append((x, y))
-                grid[y][x] = WALL
+                row.append(WALL)
             elif val == 1:
-                grid[y][x] = WALL
+                row.append(WALL)
             else:
-                grid[y][x] = EMPTY
-    return grid, door_positions
+                row.append(EMPTY)
+        grid.append(row)
+    return grid, door_positions, cols, rows
 
 
 def find_spawn(m):
