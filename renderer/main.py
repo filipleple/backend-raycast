@@ -46,7 +46,7 @@ ASSETS            = os.path.join(os.path.dirname(__file__), '..')
 SPRITE_PATH       = os.path.join(ASSETS, 'hatman.gif')
 FRAMES_DIR        = os.path.join(ASSETS, 'frames')
 TEXTURES_DIR      = os.path.join(ASSETS, 'textures')
-DOOR_TEXTURE_PATH = os.path.join(ASSETS, 'textures', 'door', 'door.gif')
+DOOR_TEXTURE_PATH = os.path.join(ASSETS, 'textures', 'doors', 'door.gif')
 
 # Entity counts per map
 NUM_MONSTERS = 0
