@@ -122,14 +122,7 @@ def build_map():
     monsters = [Monster((c + 0.5) * tile_size, (r + 0.5) * tile_size)
                 for c, r in empty_cells[:NUM_MONSTERS]]
 
-    frame_images = load_frame_images(FRAMES_DIR)
-    frame_cells  = {}
-    if frame_images:
-        wall_cells = [(c, r) for r in range(rows) for c in range(cols)
-                      if not grid[r][c].floor]
-        random.shuffle(wall_cells)
-        for c, r in wall_cells[:NUM_FRAMES]:
-            frame_cells[(c, r)] = random.choice(frame_images).convert("RGB")
+    frame_cells = {}
 
     door_cells = make_csv_doors(door_positions, grid, cols, rows, tile_size)
 
