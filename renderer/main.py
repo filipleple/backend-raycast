@@ -111,12 +111,12 @@ def build_map():
                 continue
             seen.add(sym.texture_name)
             subdir = 'doors' if sym.door else 'walls'
-            path   = os.path.join(TEXTURES_DIR, subdir, sym.texture_name + '.gif')
-            if os.path.isfile(path):
-                if sym.transparency:
-                    textures[sym.texture_name] = Image.open(path).convert("RGBA")
-                else:
-                    textures[sym.texture_name] = Image.open(path).convert("RGB")
+            for ext in ('.png', '.gif'):
+                path = os.path.join(TEXTURES_DIR, subdir, sym.texture_name + ext)
+                if os.path.isfile(path):
+                    mode = "RGBA" if sym.transparency else "RGB"
+                    textures[sym.texture_name] = Image.open(path).convert(mode)
+                    break
 
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
                    if grid[r][c].floor]
