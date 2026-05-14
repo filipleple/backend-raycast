@@ -172,12 +172,12 @@ class Renderer:
         pil_img = Image.fromarray(img, mode="RGB")
         draw    = ImageDraw.Draw(pil_img)
 
-        if player.show_map:
-            self.draw_wall_map(draw, m)
-
         distances, sides, uvs, cells = self.cast_fov(player, m)
         self.render_panes(draw, pil_img, distances, uvs, cells, m)
         self.render_sprites(pil_img, player, m, distances, others)
+
+        if player.show_map:
+            self.draw_wall_map(draw, m)
 
         return pil_img
 
