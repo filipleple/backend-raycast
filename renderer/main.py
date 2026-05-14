@@ -5,7 +5,7 @@ import random
 import threading
 from dataclasses import dataclass
 from protocol import recv_json, send_frame, recv_binary
-from math import cos, tan, radians
+from math import cos, sin, tan, radians
 from mapgen import load_map, find_spawn, make_csv_doors, Door, PortalDoor
 from fov import cast_fov
 from PIL import Image, ImageDraw
@@ -101,22 +101,28 @@ def build_map():
     grid, door_positions, cols, rows = load_map()
     tile_size = min(WIDTH // cols, HEIGHT // rows)
 
-    # load textures by name from each symbol's texture_name field
     textures = {}
-    seen = set()
+
+    def _load_tex(name, subdir, transparent):
+        if not name or name in textures:
+            return
+        for ext in ('.png', '.gif'):
+            path = os.path.join(TEXTURES_DIR, subdir, name + ext)
+            if os.path.isfile(path):
+                mode = 'RGBA' if transparent else 'RGB'
+                textures[name] = Image.open(path).convert(mode)
+                break
+
     for r in range(rows):
         for c in range(cols):
             sym = grid[r][c]
-            if not sym.texture_name or sym.texture_name in seen:
-                continue
-            seen.add(sym.texture_name)
-            subdir = 'doors' if sym.door else 'walls'
-            for ext in ('.png', '.gif'):
-                path = os.path.join(TEXTURES_DIR, subdir, sym.texture_name + ext)
-                if os.path.isfile(path):
-                    mode = "RGBA" if sym.transparency else "RGB"
-                    textures[sym.texture_name] = Image.open(path).convert(mode)
-                    break
+            if sym.texture_name:
+                subdir = 'doors' if sym.door else 'walls'
+                _load_tex(sym.texture_name, subdir, sym.transparency)
+            if sym.floor_texture:
+                _load_tex(sym.floor_texture, 'floors', False)
+            if sym.ceiling_texture:
+                _load_tex(sym.ceiling_texture, 'floors', False)
 
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
                    if grid[r][c].floor]
@@ -165,14 +171,23 @@ class PlayerState:
 
 class Renderer:
     def __init__(self, width=WIDTH, height=HEIGHT):
-        self.width  = width
-        self.height = height
-        self.hatman = Image.open(SPRITE_PATH).convert("RGBA")
+        self.width     = width
+        self.height    = height
+        self.hatman    = Image.open(SPRITE_PATH).convert("RGBA")
+        self._tex_cache = {}
+
+    def _get_tex_array(self, tex):
+        tid = id(tex)
+        if tid not in self._tex_cache:
+            self._tex_cache[tid] = np.array(tex.convert("RGB"))
+        return self._tex_cache[tid]
 
     def render(self, player, others=()):
         m       = player.current_map
         img     = np.zeros((self.height, self.width, 3), dtype=np.uint8)
         pil_img = Image.fromarray(img, mode="RGB")
+
+        pil_img = self.render_floor_ceiling(pil_img, player, m)
         draw    = ImageDraw.Draw(pil_img)
 
         hits_of_each_ray = self.cast_fov(player, m)
@@ -205,6 +220,47 @@ class Renderer:
                      (x + 1) * m.tile_size, (y + 1) * m.tile_size),
                     fill=fill,
                 )
+
+    def render_floor_ceiling(self, pil_img, player, m):
+        fov        = radians(FOV_ANGLE)
+        proj_plane = (WIDTH / 2) / tan(fov / 2)
+        half_h     = HEIGHT // 2
+
+        left_angle  = player.cam_angle - fov / 2
+        right_angle = player.cam_angle + fov / 2
+        ldx, ldy    = cos(left_angle),  sin(left_angle)
+        rdx, rdy    = cos(right_angle), sin(right_angle)
+
+        img = np.array(pil_img)
+        xs  = np.arange(WIDTH, dtype=np.float64)
+
+        def _paint(ys, img_slice, tex_attr):
+            ps   = np.abs(ys - half_h).astype(np.float64)
+            rd   = (m.tile_size * 0.5 * proj_plane) / ps          # (R,)
+            wx   = player.playerX + rd[:, None] * (ldx + (rdx - ldx) * xs / WIDTH)
+            wy   = player.playerY + rd[:, None] * (ldy + (rdy - ldy) * xs / WIDTH)
+            tx   = (wx / m.tile_size).astype(np.int32)
+            ty   = (wy / m.tile_size).astype(np.int32)
+            valid = (tx >= 0) & (tx < m.cols) & (ty >= 0) & (ty < m.rows)
+            u    = wx / m.tile_size % 1.0
+            v    = wy / m.tile_size % 1.0
+            tids = np.where(valid, ty * m.cols + tx, -1)
+            for tid in np.unique(tids[tids >= 0]):
+                tid  = int(tid)
+                cell = m.grid[tid // m.cols][tid % m.cols]
+                tex  = m.textures.get(getattr(cell, tex_attr) or '')
+                if tex is None:
+                    continue
+                ta   = self._get_tex_array(tex)
+                mask = tids == tid
+                px   = (u[mask] * ta.shape[1]).astype(np.int32) % ta.shape[1]
+                py   = (v[mask] * ta.shape[0]).astype(np.int32) % ta.shape[0]
+                img_slice[mask] = ta[py, px]
+
+        _paint(np.arange(half_h + 1, HEIGHT, dtype=np.float64), img[half_h + 1:], 'floor_texture')
+        _paint(np.arange(0,          half_h, dtype=np.float64), img[:half_h],      'ceiling_texture')
+
+        return Image.fromarray(img)
 
     def cast_fov(self, player, m):
         return cast_fov(m.grid, m.cols, m.rows, m.tile_size,

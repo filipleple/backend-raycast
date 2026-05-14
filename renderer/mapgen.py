@@ -18,14 +18,15 @@ DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
 @dataclass
 class Symbol:
-    id:           str
-    symbol:       str
-    texture_name: str
-    transparency: bool
-    walk_through: bool
-    wall:         bool
-    floor:        bool
-    door:         bool
+    id:              str
+    texture_name:    str        # wall layer texture
+    transparency:    bool       # wall layer transparency
+    walk_through:    bool       # wall layer walk-through
+    wall:            bool       # wall layer is a wall surface
+    floor:           bool       # cell is passable (derived from wall layer)
+    door:            bool       # wall layer is a door
+    floor_texture:   str | None  # floor layer texture; None for solid walls
+    ceiling_texture: str | None  # ceiling layer texture; None for solid walls
 
 
 @dataclass
@@ -49,37 +50,37 @@ class PortalDoor:
         self.target_pos = None
 
 
+_FALLBACK_DEF = {
+    'texture_name': '',
+    'transparency': True,
+    'walk_through': True,
+    'wall':         False,
+    'door':         False,
+}
+
+
 def load_definitions():
-    """Return {symbol_str: Symbol} from definitions.csv."""
+    """Return {id_str: dict} from definitions.csv."""
     defs = {}
     with open(DEFINITIONS_PATH, newline='') as f:
         for row in csv.DictReader(f):
-            sym = Symbol(
-                id=row['id'],
-                symbol=row['symbol'],
-                texture_name=row['texture_name'],
-                transparency=row['transparency'] == '1',
-                walk_through=row['walk_through'] == '1',
-                wall=row['wall'] == '1',
-                floor=row['floor'] == '1',
-                door=row['door'] == '1',
-            )
-            defs[row['symbol']] = sym
+            defs[row['id']] = {
+                'texture_name': row['texture_name'],
+                'transparency': row['transparency'] == '1',
+                'walk_through': row['walk_through'] == '1',
+                'wall':         row['wall'] == '1',
+                'door':         row['door'] == '1',
+            }
     return defs
-
-
-_FALLBACK_FLOOR = Symbol(
-    id='', symbol='', texture_name='',
-    transparency=True, walk_through=True,
-    wall=False, floor=True, door=False,
-)
 
 
 def load_map():
     """Load map.csv using definitions.csv.
 
     Returns (grid, door_positions, cols, rows) where grid is [[Symbol]].
-    Unknown symbols are treated as floor.
+    Each CSV cell is three whitespace-separated IDs: ceiling, wall, floor.
+    Floor and ceiling textures are set to None for solid-opaque walls since
+    those cells are never reached by floor/ceiling rays.
     """
     defs = load_definitions()
     raw  = list(csv.reader(open(MAP_PATH)))
@@ -91,8 +92,28 @@ def load_map():
     for y in range(rows):
         row = []
         for x in range(cols):
-            val = raw[y][x].strip()
-            sym = defs.get(val, _FALLBACK_FLOOR)
+            ceiling_id, wall_id, floor_id = raw[y][x].split()
+            wall_def = defs.get(wall_id, _FALLBACK_DEF)
+            is_solid = wall_def['wall'] and not wall_def['transparency']
+
+            if is_solid:
+                floor_tex   = None
+                ceiling_tex = None
+            else:
+                floor_tex   = defs.get(floor_id,   _FALLBACK_DEF)['texture_name'] or None
+                ceiling_tex = defs.get(ceiling_id, _FALLBACK_DEF)['texture_name'] or None
+
+            sym = Symbol(
+                id=wall_id,
+                texture_name=wall_def['texture_name'],
+                transparency=wall_def['transparency'],
+                walk_through=wall_def['walk_through'],
+                wall=wall_def['wall'],
+                floor=wall_def['walk_through'] or not wall_def['wall'],
+                door=wall_def['door'],
+                floor_texture=floor_tex,
+                ceiling_texture=ceiling_tex,
+            )
             if sym.door:
                 door_positions.append((x, y))
             row.append(sym)
