@@ -5,7 +5,7 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
     mapY = int(oy // tile_size)
 
     if 0 <= mapX < cols and 0 <= mapY < rows and not grid[mapY][mapX].floor:
-        return True, 0.0, None, 0.0, mapX, mapY
+        return []
 
     if dx == 0:
         stepX = 0
@@ -33,6 +33,8 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
             stepY = 1
             sideDistY = ((mapY + 1) * tile_size - oy) / abs(dy)
 
+    one_rays_hits = []
+
     while True:
         if sideDistX < sideDistY:
             sideDistX += deltaDistX
@@ -44,7 +46,7 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
             side = 1
 
         if mapX < 0 or mapX >= cols or mapY < 0 or mapY >= rows:
-            return False, inf, side, 0.0, mapX, mapY
+            break
 
         if not grid[mapY][mapX].floor:
             dist = sideDistX - deltaDistX if side == 0 else sideDistY - deltaDistY
@@ -53,4 +55,12 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
                 u = (oy + dist * dy) / tile_size % 1.0
             else:
                 u = (ox + dist * dx) / tile_size % 1.0
-            return True, dist, side, u, mapX, mapY
+
+            if (grid[mapY][mapX].transparency):
+                one_rays_hits.append((dist, side, u, mapX, mapY))
+                continue
+            else:
+                one_rays_hits.append((dist, side, u, mapX, mapY))
+                break
+
+    return one_rays_hits

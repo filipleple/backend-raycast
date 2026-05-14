@@ -113,7 +113,10 @@ def build_map():
             subdir = 'doors' if sym.door else 'walls'
             path   = os.path.join(TEXTURES_DIR, subdir, sym.texture_name + '.gif')
             if os.path.isfile(path):
-                textures[sym.texture_name] = Image.open(path).convert("RGB")
+                if sym.transparency:
+                    textures[sym.texture_name] = Image.open(path).convert("RGBA")
+                else:
+                    textures[sym.texture_name] = Image.open(path).convert("RGB")
 
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
                    if grid[r][c].floor]
@@ -172,8 +175,10 @@ class Renderer:
         pil_img = Image.fromarray(img, mode="RGB")
         draw    = ImageDraw.Draw(pil_img)
 
-        distances, sides, uvs, cells = self.cast_fov(player, m)
-        self.render_panes(draw, pil_img, distances, uvs, cells, m)
+        hits_of_each_ray = self.cast_fov(player, m)
+        self.render_panes(draw, pil_img, hits_of_each_ray, m)
+
+        distances = [ray_hits[-1][0] if ray_hits else float("inf") for ray_hits in hits_of_each_ray]
         self.render_sprites(pil_img, player, m, distances, others)
 
         if player.show_map:
@@ -206,35 +211,40 @@ class Renderer:
                         player.playerX, player.playerY, player.cam_angle,
                         FOV_ANGLE, NUM_RAYS)
 
-    def render_panes(self, draw, pil_img, distances, uvs, cells, m):
+    def render_panes(self, draw, pil_img, hits_of_each_ray, m):
         pane_width = WIDTH / NUM_RAYS
         fov        = radians(FOV_ANGLE)
         proj_plane = (WIDTH / 2) / tan(fov / 2)
 
-        for i in range(NUM_RAYS):
+        for i, ray_hits in enumerate(hits_of_each_ray):
             pane_x = int(i * pane_width)
             offset = (i / (NUM_RAYS - 1) - 0.5) * fov
-            dist   = distances[i] * cos(offset)
-            if dist <= 0.0001 or dist == float("inf"):
-                continue
 
-            pane_height = min((m.tile_size / dist) * proj_plane, HEIGHT)
-            y  = int(HEIGHT / 2 - pane_height / 2)
-            pw = int(pane_width) + 1
-            ph = int(pane_height)
-            cx, cy = cells[i]
+            for hit in reversed(ray_hits):
+                dist_raw, side, u, cx, cy = hit
+                dist   = dist_raw * cos(offset)
+                if dist <= 0.0001 or dist == float("inf"):
+                    continue
 
-            tex = m.frame_cells.get((cx, cy))
-            if tex is None:
-                tex = m.textures.get(m.grid[cy][cx].texture_name)
+                pane_height = min((m.tile_size / dist) * proj_plane, HEIGHT)
+                y  = int(HEIGHT / 2 - pane_height / 2)
+                pw = int(pane_width) + 1
+                ph = int(pane_height)
 
-            if tex is not None:
-                tex_x = int(uvs[i] * tex.width) % tex.width
-                strip = tex.crop((tex_x, 0, tex_x + 1, tex.height))
-                strip = strip.resize((pw, ph), Image.NEAREST)
-                pil_img.paste(strip.convert("RGB"), (pane_x, y))
-            else:
-                draw.rectangle((pane_x, y, pane_x + pw, y + ph), outline=PANE_COLOR)
+                tex = m.frame_cells.get((cx, cy))
+                if tex is None:
+                    tex = m.textures.get(m.grid[cy][cx].texture_name)
+
+                if tex is not None:
+                    tex_x = int(u * tex.width) % tex.width
+                    strip = tex.crop((tex_x, 0, tex_x + 1, tex.height))
+                    strip = strip.resize((pw, ph), Image.NEAREST)
+                    if (m.grid[cy][cx].transparency):
+                        pil_img.paste(strip, (pane_x, y), strip)
+                    else:
+                        pil_img.paste(strip.convert("RGB"), (pane_x, y))
+                else:
+                    draw.rectangle((pane_x, y, pane_x + pw, y + ph), outline=PANE_COLOR)
 
     def render_sprites(self, pil_img, player, m, distances, others=()):
         fov        = radians(FOV_ANGLE)
