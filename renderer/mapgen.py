@@ -18,13 +18,19 @@ DIRS = [(1, 0), (-1, 0), (0, 1), (0, -1)]
 
 @dataclass
 class Symbol:
-    id:              str
+    """One map cell: ceiling / wall / floor layers resolved via definitions.
+
+    Rendering keys off `wall` (does the wall layer draw a pane?);
+    movement keys off `walkable` (are the wall AND floor layers passable?).
+    """
+    wall_id:         str
+    floor_id:        str
+    ceiling_id:      str
     texture_name:    str        # wall layer texture
     transparency:    bool       # wall layer transparency
-    walk_through:    bool       # wall layer walk-through
-    wall:            bool       # wall layer is a wall surface
-    floor:           bool       # cell is passable (derived from wall layer)
+    wall:            bool       # wall layer draws a pane
     door:            bool       # wall layer is a door
+    walkable:        bool       # wall walk_through AND floor walk_through
     floor_texture:   str | None  # floor layer texture; None for solid walls
     ceiling_texture: str | None  # ceiling layer texture; None for solid walls
 
@@ -55,8 +61,11 @@ _FALLBACK_DEF = {
     'transparency': True,
     'walk_through': True,
     'wall':         False,
+    'floor':        False,
     'door':         False,
 }
+
+SPAWN_ID = '0001'
 
 
 def load_definitions():
@@ -69,6 +78,7 @@ def load_definitions():
                 'transparency': row['transparency'] == '1',
                 'walk_through': row['walk_through'] == '1',
                 'wall':         row['wall'] == '1',
+                'floor':        row['floor'] == '1',
                 'door':         row['door'] == '1',
             }
     return defs
@@ -78,12 +88,14 @@ def load_map():
     """Load map.csv using definitions.csv.
 
     Returns (grid, door_positions, cols, rows) where grid is [[Symbol]].
-    Each CSV cell is three whitespace-separated IDs: ceiling, wall, floor.
+    Each CSV cell is a quoted three-line value: ceiling, wall, floor tile IDs
+    (top to bottom, matching what the player sees looking at the cell).
     Floor and ceiling textures are set to None for solid-opaque walls since
     those cells are never reached by floor/ceiling rays.
     """
     defs = load_definitions()
-    raw  = list(csv.reader(open(MAP_PATH)))
+    with open(MAP_PATH, newline='') as f:
+        raw = [row for row in csv.reader(f) if row]
     rows = len(raw)
     cols = next((i for i, v in enumerate(raw[0]) if v.strip() == ''), len(raw[0]))
 
@@ -92,25 +104,38 @@ def load_map():
     for y in range(rows):
         row = []
         for x in range(cols):
-            ceiling_id, wall_id, floor_id = raw[y][x].split()
-            wall_def = defs.get(wall_id, _FALLBACK_DEF)
-            is_solid = wall_def['wall'] and not wall_def['transparency']
+            layers = raw[y][x].split()
+            if len(layers) != 3:
+                raise ValueError(
+                    f'map.csv cell ({x},{y}) has {len(layers)} layer IDs, '
+                    f'expected 3 (ceiling, wall, floor): {raw[y][x]!r}')
+            ceiling_id, wall_id, floor_id = layers
+
+            wall_def    = defs.get(wall_id,    _FALLBACK_DEF)
+            floor_def   = defs.get(floor_id,   _FALLBACK_DEF)
+            ceiling_def = defs.get(ceiling_id, _FALLBACK_DEF)
+            is_solid    = wall_def['wall'] and not wall_def['transparency']
 
             if is_solid:
                 floor_tex   = None
                 ceiling_tex = None
             else:
-                floor_tex   = defs.get(floor_id,   _FALLBACK_DEF)['texture_name'] or None
-                ceiling_tex = defs.get(ceiling_id, _FALLBACK_DEF)['texture_name'] or None
+                floor_tex   = floor_def['texture_name']   or None
+                ceiling_tex = ceiling_def['texture_name'] or None
+                # a floor-type tile in the wall slot (water, rug, lava, ...)
+                # draws no pane; it decorates the floor instead
+                if wall_def['floor'] and not wall_def['wall']:
+                    floor_tex = wall_def['texture_name'] or floor_tex
 
             sym = Symbol(
-                id=wall_id,
+                wall_id=wall_id,
+                floor_id=floor_id,
+                ceiling_id=ceiling_id,
                 texture_name=wall_def['texture_name'],
                 transparency=wall_def['transparency'],
-                walk_through=wall_def['walk_through'],
                 wall=wall_def['wall'],
-                floor=wall_def['walk_through'] or not wall_def['wall'],
                 door=wall_def['door'],
+                walkable=wall_def['walk_through'] and floor_def['walk_through'],
                 floor_texture=floor_tex,
                 ceiling_texture=ceiling_tex,
             )
@@ -135,16 +160,22 @@ def generate_map(cols, rows, fill=0.3, seed=None):
 
 
 def find_spawn(m):
-    """Pixel (x, y) of the empty cell closest to grid origin."""
+    """Pixel (x, y) of the spawn tile (wall-layer id 0001), or failing that
+    the walkable cell closest to grid origin."""
     best, best_dist = None, float('inf')
     for row in range(m.rows):
         for col in range(m.cols):
-            if m.grid[row][col].floor:
+            sym = m.grid[row][col]
+            if sym.wall_id == SPAWN_ID:
+                return (col + 0.5) * m.tile_size, (row + 0.5) * m.tile_size
+            if sym.walkable:
                 dist = math.hypot(col, row)
                 if dist < best_dist:
                     best_dist = dist
                     best      = (col, row)
-    return (3 + 0.5) * m.tile_size, (3 + 0.5) * m.tile_size
+    if best is None:
+        best = (0, 0)
+    return (best[0] + 0.5) * m.tile_size, (best[1] + 0.5) * m.tile_size
 
 
 def flood_fill_regions(grid, cols, rows):
@@ -152,7 +183,7 @@ def flood_fill_regions(grid, cols, rows):
     count     = 0
     for r in range(rows):
         for c in range(cols):
-            if grid[r][c].floor and (c, r) not in region_of:
+            if grid[r][c].walkable and (c, r) not in region_of:
                 q = deque([(c, r)])
                 while q:
                     cc, rr = q.popleft()
@@ -162,7 +193,7 @@ def flood_fill_regions(grid, cols, rows):
                     for dc, dr in DIRS:
                         nc, nr = cc + dc, rr + dr
                         if 0 <= nc < cols and 0 <= nr < rows \
-                                and grid[nr][nc].floor \
+                                and grid[nr][nc].walkable \
                                 and (nc, nr) not in region_of:
                             q.append((nc, nr))
                 count += 1
@@ -176,7 +207,7 @@ def make_csv_doors(door_positions, grid, cols, rows, tile_size):
         exits = []
         for dc, dr in DIRS:
             nc, nr = c + dc, r + dr
-            if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc].floor:
+            if 0 <= nc < cols and 0 <= nr < rows and grid[nr][nc].walkable:
                 exits.append((nc, nr))
         if len(exits) >= 2:
             ca, cb = exits[0], exits[1]
@@ -215,7 +246,7 @@ def find_doors(grid, cols, rows, tile_size):
     borders = []
     for r in range(rows):
         for c in range(cols):
-            if not grid[r][c].floor:
+            if not grid[r][c].walkable:
                 adj = {}
                 for dc, dr in DIRS:
                     nc, nr = c + dc, r + dr
@@ -277,7 +308,7 @@ def find_doors(grid, cols, rows, tile_size):
         door_pos    = None
 
         for i, (cc, rr) in enumerate(path):
-            if not grid[rr][cc].floor:
+            if not grid[rr][cc].walkable:
                 door_pos    = (cc, rr)
                 exit_a_cell = path[i - 1] if i > 0 else None
                 break

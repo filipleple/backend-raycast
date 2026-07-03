@@ -4,8 +4,12 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
     mapX = int(ox // tile_size)
     mapY = int(oy // tile_size)
 
-    if 0 <= mapX < cols and 0 <= mapY < rows and not grid[mapY][mapX].floor:
-        return []
+    # bail only when the camera sits inside a solid-opaque wall; transparent
+    # or walk-through wall layers (arch, glass, sprites) still get cast through
+    if 0 <= mapX < cols and 0 <= mapY < rows:
+        start = grid[mapY][mapX]
+        if start.wall and not start.transparency:
+            return []
 
     if dx == 0:
         stepX = 0
@@ -48,7 +52,7 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
         if mapX < 0 or mapX >= cols or mapY < 0 or mapY >= rows:
             break
 
-        if not grid[mapY][mapX].floor:
+        if grid[mapY][mapX].wall:
             dist = sideDistX - deltaDistX if side == 0 else sideDistY - deltaDistY
             # UV: fractional position along the wall face that was hit
             if side == 0:
@@ -56,11 +60,8 @@ def cast_ray_dda(grid, cols, rows, tile_size, ox, oy, dx, dy):
             else:
                 u = (ox + dist * dx) / tile_size % 1.0
 
-            if (grid[mapY][mapX].transparency):
-                one_rays_hits.append((dist, side, u, mapX, mapY))
-                continue
-            else:
-                one_rays_hits.append((dist, side, u, mapX, mapY))
+            one_rays_hits.append((dist, side, u, mapX, mapY))
+            if not grid[mapY][mapX].transparency:
                 break
 
     return one_rays_hits

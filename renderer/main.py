@@ -27,11 +27,16 @@ WALL_COLOR = GREY
 PANE_COLOR = RED
 
 # FOV/raycasting settings
-FOV_ANGLE     = 60
-NUM_RAYS      = 120
-PLAYER_SPEED  = 10
+FOV_ANGLE = 60
+NUM_RAYS  = 120
+
+# World scale — fixed, independent of screen and map size. Movement is in
+# world pixels; speed + margin must stay below TILE_SIZE or the per-axis
+# collision check can skip over a one-tile wall.
+TILE_SIZE     = 64
+PLAYER_SPEED  = TILE_SIZE * 0.25   # world px per tick
 TURN_SPEED    = 0.1
-PLAYER_MARGIN = 8  # collision radius in pixels
+PLAYER_MARGIN = TILE_SIZE * 0.2    # collision radius in world px
 
 # Protocol settings
 HOST = "0.0.0.0"
@@ -99,24 +104,29 @@ class Map:
 
 def build_map():
     grid, door_positions, cols, rows = load_map()
-    tile_size = min(WIDTH // cols, HEIGHT // rows)
+    tile_size = TILE_SIZE
 
     textures = {}
 
-    def _load_tex(name, subdir, transparent):
+    def _load_tex(name, preferred_subdir, transparent):
+        """Load a texture by name, checking the preferred subdir first and
+        falling back to the others (e.g. `grave` lives in misc/)."""
         if not name or name in textures:
             return
-        for ext in ('.png', '.gif'):
-            path = os.path.join(TEXTURES_DIR, subdir, name + ext)
-            if os.path.isfile(path):
-                mode = 'RGBA' if transparent else 'RGB'
-                textures[name] = Image.open(path).convert(mode)
-                break
+        subdirs = [preferred_subdir] + \
+            [d for d in ('walls', 'doors', 'floors', 'misc') if d != preferred_subdir]
+        for subdir in subdirs:
+            for ext in ('.png', '.gif'):
+                path = os.path.join(TEXTURES_DIR, subdir, name + ext)
+                if os.path.isfile(path):
+                    mode = 'RGBA' if transparent else 'RGB'
+                    textures[name] = Image.open(path).convert(mode)
+                    return
 
     for r in range(rows):
         for c in range(cols):
             sym = grid[r][c]
-            if sym.texture_name:
+            if sym.wall and sym.texture_name:
                 subdir = 'doors' if sym.door else 'walls'
                 _load_tex(sym.texture_name, subdir, sym.transparency)
             if sym.floor_texture:
@@ -125,7 +135,7 @@ def build_map():
                 _load_tex(sym.ceiling_texture, 'floors', False)
 
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
-                   if grid[r][c].floor]
+                   if grid[r][c].walkable]
     random.shuffle(empty_cells)
 
     monsters = [Monster((c + 0.5) * tile_size, (r + 0.5) * tile_size)
@@ -197,7 +207,7 @@ class Renderer:
         self.render_sprites(pil_img, player, m, distances, others)
 
         if player.show_map:
-            self.draw_wall_map(draw, m)
+            self.draw_wall_map(draw, m, player)
 
         return pil_img
 
@@ -206,20 +216,26 @@ class Renderer:
         pil_img.convert("RGB").save(buf, format="JPEG", quality=quality)
         return buf.getvalue()
 
-    def draw_wall_map(self, draw, m):
+    def draw_wall_map(self, draw, m, player=None):
+        # minimap scale is screen-derived; world tile_size is fixed at 64
+        scale = min(self.width / m.cols, self.height / m.rows)
         for y in range(m.rows):
             for x in range(m.cols):
-                if m.grid[y][x].floor:
+                if not m.grid[y][x].wall:
                     continue
                 if (x, y) in m.door_cells:
                     fill = BROWN
                 else:
                     fill = WALL_COLOR
                 draw.rectangle(
-                    (x * m.tile_size, y * m.tile_size,
-                     (x + 1) * m.tile_size, (y + 1) * m.tile_size),
+                    (x * scale, y * scale,
+                     (x + 1) * scale, (y + 1) * scale),
                     fill=fill,
                 )
+        if player is not None:
+            px = player.playerX / m.tile_size * scale
+            py = player.playerY / m.tile_size * scale
+            draw.ellipse((px - 2, py - 2, px + 2, py + 2), fill=RED)
 
     def render_floor_ceiling(self, pil_img, player, m):
         fov        = radians(FOV_ANGLE)
@@ -432,13 +448,13 @@ def update(player, inputs):
     if moveX != 0:
         cx = int((newX + math.copysign(PLAYER_MARGIN, moveX)) / ts)
         cy = int(player.playerY / ts)
-        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].floor:
+        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].walkable:
             newX = player.playerX
 
     if moveY != 0:
         cx = int(newX / ts)
         cy = int((newY + math.copysign(PLAYER_MARGIN, moveY)) / ts)
-        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].floor:
+        if not (0 <= cx < m.cols and 0 <= cy < m.rows) or not m.grid[cy][cx].walkable:
             newY = player.playerY
 
     player.playerX     = newX
