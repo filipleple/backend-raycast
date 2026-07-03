@@ -127,7 +127,7 @@ def build_map():
         for c in range(cols):
             sym = grid[r][c]
             if sym.wall and sym.texture_name:
-                subdir = 'doors' if sym.door else 'walls'
+                subdir = 'door' if sym.door else 'walls'
                 _load_tex(sym.texture_name, subdir, sym.transparency)
             if sym.floor_texture:
                 _load_tex(sym.floor_texture, 'floors+ceilings', False)
