@@ -130,9 +130,9 @@ def build_map():
                 subdir = 'doors' if sym.door else 'walls'
                 _load_tex(sym.texture_name, subdir, sym.transparency)
             if sym.floor_texture:
-                _load_tex(sym.floor_texture, 'floors', False)
+                _load_tex(sym.floor_texture, 'floors+ceilings', False)
             if sym.ceiling_texture:
-                _load_tex(sym.ceiling_texture, 'floors', False)
+                _load_tex(sym.ceiling_texture, 'floors+ceilings', False)
 
     empty_cells = [(c, r) for r in range(rows) for c in range(cols)
                    if grid[r][c].walkable]
