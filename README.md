@@ -1,8 +1,8 @@
 # browser-raycast
 
-A multiplayer browser game where a Go server bridges a WebSocket frontend and a
-Python rendering backend. The Go side manages sessions, auth, and timing; Python
-owns the game state and produces frames. PostgreSQL stores users and sessions.
+A multiplayer browser game. A single Go server owns everything: sessions,
+auth, timing, game state and the raycasting renderer (the `game/` package).
+PostgreSQL stores users and sessions.
 
 ---
 
@@ -21,7 +21,7 @@ owns the game state and produces frames. PostgreSQL stores users and sessions.
                         │  HTTP (auth API + static files)
                         │  WebSocket  (port 8080)
                         │  JSON key state  ▼
-                        │  PNG frames      ▲
+                        │  JPEG frames     ▲
 ┌───────────────────────┴─────────────────────────────────┐
 │  Go server                                              │
 │                                                         │
@@ -35,27 +35,24 @@ owns the game state and produces frames. PostgreSQL stores users and sessions.
 │          │     on disconnect → closes done channel      │
 │          │                                              │
 │          └── tickLoop()  [main goroutine]               │
-│                fires every 50ms                         │
-│                snapshots input → SendInput → recv PNG   │
-│                sends PNG to browser via WS              │
+│                fires every 100ms                        │
+│                snapshots input → engine.Tick()          │
+│                sends JPEG to browser via WS             │
 │                on done / error → Cleanup()              │
-└──────────┬────────────────────────┬─────────────────────┘
-           │  TCP  (port 9000)      │  postgres (port 5432)
-           │  length-prefixed       │  users, sessions
-           │  JSON input  ▼         │
-           │  PNG frame   ▲         │
-┌──────────┴──────────────┐  ┌──────┴──────────────────────┐
-│  Python renderer        │  │  PostgreSQL                  │
-│  (renderer/main.py)     │  │                              │
-│                         │  │  users  — bcrypt passwords,  │
-│  accept loop            │  │           avatar blobs        │
-│    └── handle_client()  │  │  sessions — token → user_id  │
-│          recv JSON →    │  └─────────────────────────────┘
-│          update(state)  │
-│          → render()     │
-│          → PNG bytes    │
-│          send PNG back  │
-└─────────────────────────┘
+│                                                         │
+│  game/ — shared world + per-player state                │
+│    Step()   input → movement/collision  [write lock]    │
+│    Render() DDA raycasting → JPEG       [read lock]     │
+└───────────────────────────────┬─────────────────────────┘
+                                │  postgres (port 5432)
+                                │  users, sessions
+                  ┌─────────────┴───────────────┐
+                  │  PostgreSQL                  │
+                  │                              │
+                  │  users  — bcrypt passwords,  │
+                  │           avatar blobs        │
+                  │  sessions — token → user_id  │
+                  └──────────────────────────────┘
 ```
 
 ---
@@ -66,7 +63,8 @@ owns the game state and produces frames. PostgreSQL stores users and sessions.
 
 ## Running
 
-The stack runs as three containers. Copy the example env, then bring it up:
+The stack runs as two containers (server + Postgres). Copy the example env,
+then bring it up:
 
 ```bash
 cp .env.example .env   # fill in POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
@@ -76,9 +74,8 @@ docker compose up --build
 Open `http://localhost:8080`. Register an account, upload an optional avatar,
 then click **join game**.
 
-The old `run.sh` (bare `go run . && python3 renderer/main.py`) still works for
-local dev but requires a local Postgres instance reachable at the default
-`DATABASE_URL`.
+`run.sh` (bare `go run .`) still works for local dev but requires a local
+Postgres instance reachable at the default `DATABASE_URL`.
 
 ### Production
 
@@ -114,15 +111,8 @@ cookie — unauthenticated connections are rejected with 401.
 ### WebSocket
 Persistent full-duplex connection between browser and Go server, over HTTP
 upgrade. Used here for two separate data streams on one connection: JSON key
-state going in, binary PNG frames coming out. The browser sets `binaryType =
+state going in, binary JPEG frames coming out. The browser sets `binaryType =
 "blob"` so received frames can be fed directly to `createImageBitmap`.
-
-### TCP with length-prefixed framing
-Raw TCP has no concept of messages — it's a byte stream. To send structured
-messages, every payload is prefixed with a 4-byte big-endian length. The
-receiver reads the header first, then reads exactly that many bytes. This is
-implemented symmetrically in `protocol.go` and `renderer/protocol.py`.
-`io.ReadFull` / `recv_exact` ensure partial reads are handled correctly.
 
 ### Goroutines and channels
 Each browser session spawns two goroutines worth of work:
@@ -140,14 +130,10 @@ one-time signals between goroutines.
 the sole writer to the WebSocket connection, avoiding the need to lock writes.
 
 ### Decoupled tick rate vs. input rate
-The browser sends input at 20Hz. The renderer ticks at 20Hz (50ms). These are
+The browser sends input at 20Hz. The renderer ticks at 10Hz (100ms). These are
 intentionally independent: input arrives asynchronously and is merged into a
 shared map; the ticker snapshots whatever is current. This avoids coupling the
 render clock to network jitter.
-
-### Request-response over TCP
-The Go-to-Python protocol is synchronous request/response per tick: send JSON
-input, block until PNG comes back. Simple and sufficient — no pipelining needed.
 
 ### Session-cookie auth
 Login issues an `HttpOnly` `session_token` cookie backed by a Postgres
@@ -155,10 +141,12 @@ Login issues an `HttpOnly` `session_token` cookie backed by a Postgres
 session on every request. Logout deletes the DB row and closes any open WS
 connection for that user.
 
-### Python as a rendering subprocess
-Python owns `GameState` and `Renderer`. It uses Pillow to draw to an in-memory
-image, encodes it as PNG, and sends the bytes over TCP. This keeps game logic
-and rendering in Python while Go handles all the networking and auth.
+### In-process rendering with a shared world
+The `game/` package owns the world and every player. One `sync.RWMutex` covers
+both: an input step mutates state under the write lock, rendering only reads
+under the read lock, so concurrent sessions render in parallel. Rendering is
+DDA raycasting (walls), per-pixel floor/ceiling casting, billboard sprites and
+stdlib `image/jpeg` encoding.
 
 ---
 
@@ -169,15 +157,16 @@ and rendering in Python while Go handles all the networking and auth.
 | `main.go` | HTTP routing, WebSocket upgrade, session guard |
 | `auth.go` | Register/login/logout handlers, bcrypt, Postgres helpers |
 | `session.go` | `Session` type: `readWS` goroutine + `tickLoop`, lifecycle |
-| `python.go` | `PythonClient`: TCP connection to renderer, `SendInput` |
-| `protocol.go` | Low-level framing: `sendFrame`, `recvBinary`, `recvExact` |
+| `game/world.go` | `Engine`: shared world, players, locking, `Tick` |
+| `game/mapload.go` | Tile map loader (`TILES.csv`/`map.csv` + `definitions.csv`) |
+| `game/update.go` | Per-tick input: movement, collision, doors, portals |
+| `game/dda.go` | DDA raycasting through the tile grid |
+| `game/fov.go` | Fires 120 rays across the 60° FOV |
+| `game/render.go` | Floor/ceiling casting, wall panes, sprites, minimap, JPEG |
+| `game/texture.go` | Texture loading (PNG/GIF) and sampling |
 | `db/schema.sql` | Postgres schema: `users`, `sessions` tables |
 | `static/index.html` | Login/register page + avatar management |
 | `static/game.html` | Gameplay canvas: key capture, WS loop, frame rendering |
-| `renderer/main.py` | Python TCP server: accept loop, per-client handler |
-| `renderer/render.py` | Game state, update logic, Pillow rendering |
-| `renderer/protocol.py` | Python mirror of the length-prefixed framing protocol |
-| `Dockerfile.backend` | Go server image |
-| `Dockerfile.py` | Python renderer image |
-| `docker-compose.yml` | Local dev: builds all three services |
+| `Dockerfile.backend` | Go server image (bundles map, definitions, textures) |
+| `docker-compose.yml` | Local dev: server + Postgres + Caddy |
 | `docker-compose.prod.yml` | Production overlay: GHCR images, restart policies |

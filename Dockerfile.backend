@@ -9,6 +9,8 @@ FROM alpine:latest
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY static/ ./static/
+COPY textures/ ./textures/
+COPY hatman.gif definitions.csv map.csv TILES.csv ./
 EXPOSE 8080
 CMD ["./server"]
 

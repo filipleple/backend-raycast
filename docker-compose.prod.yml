@@ -2,10 +2,6 @@ services:
   db:
     restart: unless-stopped
 
-  py-renderer:
-    image: ghcr.io/${GHCR_USER}/raycast-py-renderer:latest
-    restart: unless-stopped
-
   go-backend:
     image: ghcr.io/${GHCR_USER}/raycast-go-backend:latest
     restart: unless-stopped
