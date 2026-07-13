@@ -6,12 +6,15 @@ import (
 	"sync"
 	"time"
 
+	"raycast/game"
+
 	"github.com/gorilla/websocket"
 )
 
 type Session struct {
 	wsConn *websocket.Conn
-	pyConn *PythonClient
+	engine *game.Engine
+	player *game.Player
 
 	mu    sync.RWMutex
 	input map[string]bool
@@ -41,13 +44,13 @@ func (s *Session) tickLoop() {
 		}
 		s.mu.RUnlock()
 
-		png, err := s.pyConn.SendInput(InputMessage{PlayerID: s.userID, Keys: snapshot})
+		frame, err := s.engine.Tick(s.player, snapshot)
 		if err != nil {
 			return
 		}
 
 		s.wsConn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
-		err = s.wsConn.WriteMessage(websocket.BinaryMessage, png)
+		err = s.wsConn.WriteMessage(websocket.BinaryMessage, frame)
 		s.wsConn.SetWriteDeadline(time.Time{})
 		if err != nil {
 			return
@@ -85,5 +88,5 @@ func (s *Session) readWS() {
 
 func (s *Session) Cleanup() {
 	s.wsConn.Close()
-	s.pyConn.Close()
+	s.engine.Leave(s.player)
 }

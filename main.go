@@ -4,8 +4,9 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
-	"os"
 	"sync"
+
+	"raycast/game"
 
 	"github.com/gorilla/websocket"
 	_ "github.com/lib/pq"
@@ -23,6 +24,11 @@ var (
 func main() {
 	db := connectPostgresDB()
 	defer db.Close()
+
+	engine, err := game.NewEngine(".")
+	if err != nil {
+		log.Fatal("loading game assets: ", err)
+	}
 
 	// auth routes
 	http.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
@@ -51,13 +57,13 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
-		handleWS(w, r, db)
+		handleWS(w, r, db, engine)
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
-func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB, engine *game.Engine) {
 	user, err := getUserBySessionCookie(db, r)
 	if err != nil {
 		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
@@ -85,32 +91,16 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	// allow hosting the renderer at different addresses
-	pyAddr := os.Getenv("RENDERER_ADDR")
-	if pyAddr == "" {
-		pyAddr = "127.0.0.1:9000"
-	}
-	log.Println("connecting to the renderer at: ", pyAddr)
-	pythonClient, err := NewPythonClient(pyAddr)
-	if err != nil {
-		log.Println("connecting to the renderer failed")
-		ws.Close()
-		return
-	}
-
 	avatarBytes, _, _, err := getAvatar(db, user.Username)
 	if err != nil {
 		avatarBytes = nil
 	}
-	if err := pythonClient.SendHandshake(user.ID, avatarBytes); err != nil {
-		ws.Close()
-		pythonClient.Close()
-		return
-	}
+	player := engine.Join(user.ID, avatarBytes)
 
 	session := &Session{
 		wsConn:   ws,
-		pyConn:   pythonClient,
+		engine:   engine,
+		player:   player,
 		input:    make(map[string]bool),
 		done:     make(chan struct{}),
 		userID:   user.ID,
