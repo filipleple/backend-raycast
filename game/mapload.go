@@ -41,6 +41,40 @@ type PortalDoor struct {
 
 var dirs = [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
 
+// makeSymbol resolves a cell's three layer IDs into a Symbol through the
+// definitions table — the single source of truth for both the map loader and
+// scripted map edits.
+func makeSymbol(defs map[string]Def, ceilingID, wallID, floorID string) Symbol {
+	wallDef := defOr(defs, wallID)
+	floorDef := defOr(defs, floorID)
+	ceilingDef := defOr(defs, ceilingID)
+	isSolid := wallDef.Wall && !wallDef.Transparency
+
+	var floorTex, ceilingTex string
+	if !isSolid {
+		floorTex = floorDef.TextureName
+		ceilingTex = ceilingDef.TextureName
+		// a floor-type tile in the wall slot (water, rug, lava, ...)
+		// draws no pane; it decorates the floor instead
+		if wallDef.Floor && !wallDef.Wall && wallDef.TextureName != "" {
+			floorTex = wallDef.TextureName
+		}
+	}
+
+	return Symbol{
+		WallID:         wallID,
+		FloorID:        floorID,
+		CeilingID:      ceilingID,
+		TextureName:    wallDef.TextureName,
+		Transparency:   wallDef.Transparency,
+		Wall:           wallDef.Wall,
+		Door:           wallDef.Door,
+		Walkable:       wallDef.WalkThrough && floorDef.WalkThrough,
+		FloorTexture:   floorTex,
+		CeilingTexture: ceilingTex,
+	}
+}
+
 // loadMapCSV parses the tile map using definitions. Each CSV cell is a quoted
 // three-line value: ceiling, wall, floor tile IDs (top to bottom, matching
 // what the player sees looking at the cell). Floor and ceiling textures are
@@ -84,36 +118,7 @@ func loadMapCSV(path string, defs map[string]Def) (grid [][]Symbol, doorPosition
 					"map %s: cell (%d,%d) has %d layer IDs, expected 3 (ceiling, wall, floor): %q",
 					path, x, y, len(layers), raw[y][x])
 			}
-			ceilingID, wallID, floorID := layers[0], layers[1], layers[2]
-
-			wallDef := defOr(defs, wallID)
-			floorDef := defOr(defs, floorID)
-			ceilingDef := defOr(defs, ceilingID)
-			isSolid := wallDef.Wall && !wallDef.Transparency
-
-			var floorTex, ceilingTex string
-			if !isSolid {
-				floorTex = floorDef.TextureName
-				ceilingTex = ceilingDef.TextureName
-				// a floor-type tile in the wall slot (water, rug, lava, ...)
-				// draws no pane; it decorates the floor instead
-				if wallDef.Floor && !wallDef.Wall && wallDef.TextureName != "" {
-					floorTex = wallDef.TextureName
-				}
-			}
-
-			sym := Symbol{
-				WallID:         wallID,
-				FloorID:        floorID,
-				CeilingID:      ceilingID,
-				TextureName:    wallDef.TextureName,
-				Transparency:   wallDef.Transparency,
-				Wall:           wallDef.Wall,
-				Door:           wallDef.Door,
-				Walkable:       wallDef.WalkThrough && floorDef.WalkThrough,
-				FloorTexture:   floorTex,
-				CeilingTexture: ceilingTex,
-			}
+			sym := makeSymbol(defs, layers[0], layers[1], layers[2])
 			if sym.Door {
 				doorPositions = append(doorPositions, [2]int{x, y})
 			}

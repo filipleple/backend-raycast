@@ -28,6 +28,13 @@ func (s *Session) tickLoop() {
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	defer s.Cleanup()
+	// scripts are allowed to wreck a player's state badly enough that
+	// rendering panics; that kicks this player, not the server
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("session for %s died: %v", s.username, r)
+		}
+	}()
 
 	for {
 		select {
@@ -44,12 +51,20 @@ func (s *Session) tickLoop() {
 		}
 		s.mu.RUnlock()
 
-		frame, err := s.engine.Tick(s.player, snapshot)
+		frame, events, err := s.engine.Tick(s.player, snapshot)
 		if err != nil {
 			return
 		}
 
+		// text frames carry JSON control events (music, popups, sounds);
+		// binary frames stay JPEG video — the browser tells them apart for
+		// free in onmessage
 		s.wsConn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+		if events != nil {
+			if err := s.wsConn.WriteMessage(websocket.TextMessage, events); err != nil {
+				return
+			}
+		}
 		err = s.wsConn.WriteMessage(websocket.BinaryMessage, frame)
 		s.wsConn.SetWriteDeadline(time.Time{})
 		if err != nil {

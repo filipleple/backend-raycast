@@ -2,6 +2,7 @@ package game
 
 import (
 	"bytes"
+	"encoding/json"
 	"image"
 	"os"
 	"path/filepath"
@@ -39,6 +40,7 @@ type Map struct {
 	Monsters    []Monster
 	DoorCells   map[[2]int]*Door
 	PortalDoors map[[2]int]*PortalDoor
+	MusicZones  [][]string // parallel MUSIC.csv grid; nil = no zone music
 }
 
 type World struct {
@@ -47,12 +49,24 @@ type World struct {
 
 type Player struct {
 	ID         int
+	Name       string
 	Avatar     *Texture // nil falls back to hatman
 	CurrentMap *Map
 	X, Y       float64
 	Angle      float64
 	ShowMap    bool
 	prevInputs map[string]bool
+
+	events []Event // outgoing control messages, drained each tick
+
+	// music-zone state machine
+	musicZone    string
+	musicLocked  bool // a script pinned the track; ignore zones
+	pendingZone  string
+	pendingTicks int
+
+	// last cell, for onEnter edge detection
+	prevCol, prevRow int
 }
 
 // Engine owns the shared world and all connected players. Input steps mutate
@@ -64,8 +78,10 @@ type Engine struct {
 	players  []*Player
 	renderer *renderer
 
-	root string
-	defs map[string]Def
+	root      string
+	defs      map[string]Def
+	musicDefs map[string]MusicDef
+	scripts   *scriptHost
 }
 
 // NewEngine loads definitions, the tile map and all referenced textures from
@@ -76,13 +92,18 @@ func NewEngine(root string) (*Engine, error) {
 	if err != nil {
 		return nil, err
 	}
-	e := &Engine{root: root, defs: defs}
+	musicDefs, err := loadMusicDefs(filepath.Join(root, "MUSIC_DEFS.csv"))
+	if err != nil {
+		return nil, err
+	}
+	e := &Engine{root: root, defs: defs, musicDefs: musicDefs}
 
 	m, err := e.buildMap()
 	if err != nil {
 		return nil, err
 	}
 	e.world = &World{Maps: []*Map{m}}
+	e.scripts = newScriptHost(filepath.Join(root, "scripts"))
 
 	sprite, err := loadImageFile(filepath.Join(root, "hatman.gif"))
 	if err != nil {
@@ -114,39 +135,80 @@ func (e *Engine) buildMap() (*Map, error) {
 		DoorCells:   makeCSVDoors(doorPositions, grid, cols, rows, TileSize),
 		PortalDoors: map[[2]int]*PortalDoor{},
 	}
-
-	texDir := filepath.Join(e.root, "textures")
-	loadTex := func(name, preferred string, keepAlpha bool) {
-		if name == "" {
-			return
-		}
-		if _, ok := m.Textures[name]; ok {
-			return
-		}
-		if t := loadTextureFile(texDir, name, preferred, keepAlpha); t != nil {
-			m.Textures[name] = t
-		}
+	zones, err := loadMusicCSV(filepath.Join(e.root, "MUSIC.csv"), cols, rows)
+	if err != nil {
+		return nil, err
 	}
+	m.MusicZones = zones
+
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
-			sym := grid[r][c]
-			if sym.Wall && sym.TextureName != "" {
-				preferred := "walls"
-				if sym.Door {
-					preferred = "door"
-				}
-				loadTex(sym.TextureName, preferred, sym.Transparency)
-			}
-			loadTex(sym.FloorTexture, "floors+ceilings", false)
-			loadTex(sym.CeilingTexture, "floors+ceilings", false)
+			e.ensureSymbolTextures(m, grid[r][c])
 		}
 	}
 	return m, nil
 }
 
+// ensureTexture loads name into m.Textures if not already present.
+func (e *Engine) ensureTexture(m *Map, name, preferred string, keepAlpha bool) {
+	if name == "" {
+		return
+	}
+	if _, ok := m.Textures[name]; ok {
+		return
+	}
+	if t := loadTextureFile(filepath.Join(e.root, "textures"), name, preferred, keepAlpha); t != nil {
+		m.Textures[name] = t
+	}
+}
+
+// ensureSymbolTextures loads every texture sym references.
+func (e *Engine) ensureSymbolTextures(m *Map, sym Symbol) {
+	if sym.Wall && sym.TextureName != "" {
+		preferred := "walls"
+		if sym.Door {
+			preferred = "door"
+		}
+		e.ensureTexture(m, sym.TextureName, preferred, sym.Transparency)
+	}
+	e.ensureTexture(m, sym.FloorTexture, "floors+ceilings", false)
+	e.ensureTexture(m, sym.CeilingTexture, "floors+ceilings", false)
+}
+
+// setCellLayer rewrites one layer of a cell through the definitions table,
+// exactly like the map loader would, and keeps DoorCells coherent. The change
+// is global — every player sees it. layer: 0 ceiling, 1 wall, 2 floor.
+// Caller must hold the write lock.
+func (e *Engine) setCellLayer(m *Map, col, row, layer int, id string) {
+	if col < 0 || col >= m.Cols || row < 0 || row >= m.Rows {
+		return
+	}
+	old := m.Grid[row][col]
+	c, w, f := old.CeilingID, old.WallID, old.FloorID
+	switch layer {
+	case 0:
+		c = id
+	case 1:
+		w = id
+	case 2:
+		f = id
+	}
+	sym := makeSymbol(e.defs, c, w, f)
+	m.Grid[row][col] = sym
+	e.ensureSymbolTextures(m, sym)
+
+	pos := [2]int{col, row}
+	delete(m.DoorCells, pos)
+	if sym.Door {
+		for k, v := range makeCSVDoors([][2]int{pos}, m.Grid, m.Cols, m.Rows, m.TileSize) {
+			m.DoorCells[k] = v
+		}
+	}
+}
+
 // Join spawns a player on the first map. avatarBytes may be nil or invalid
 // image data; both fall back to the hatman sprite.
-func (e *Engine) Join(id int, avatarBytes []byte) *Player {
+func (e *Engine) Join(id int, name string, avatarBytes []byte) *Player {
 	var avatar *Texture
 	if len(avatarBytes) > 0 {
 		if img, _, err := image.Decode(bytes.NewReader(avatarBytes)); err == nil {
@@ -158,12 +220,20 @@ func (e *Engine) Join(id int, avatarBytes []byte) *Player {
 	defer e.mu.Unlock()
 	p := &Player{
 		ID:         id,
+		Name:       name,
 		Avatar:     avatar,
 		CurrentMap: e.world.Maps[0],
 		prevInputs: map[string]bool{},
 	}
 	p.X, p.Y = findSpawn(p.CurrentMap)
+	p.prevCol, p.prevRow = int(p.X/p.CurrentMap.TileSize), int(p.Y/p.CurrentMap.TileSize)
 	e.players = append(e.players, p)
+
+	// start the spawn zone's track right away (no hysteresis on join)
+	if z := p.CurrentMap.MusicZones; z != nil {
+		e.setMusic(p, z[p.prevRow][p.prevCol])
+	}
+	e.scripts.fireJoin(e, p)
 	return p
 }
 
@@ -199,8 +269,13 @@ func (e *Engine) RenderFrame(p *Player) *image.NRGBA {
 }
 
 // Tick is one session tick: apply the input snapshot, render p's view and
-// encode it for the wire.
-func (e *Engine) Tick(p *Player, keys map[string]bool) ([]byte, error) {
+// encode it for the wire. events is a JSON array of control messages for the
+// browser, or nil when there is nothing to say this tick.
+func (e *Engine) Tick(p *Player, keys map[string]bool) (frame, events []byte, err error) {
 	e.Step(p, keys)
-	return encodeJPEG(e.RenderFrame(p))
+	if evs := e.DrainEvents(p); len(evs) > 0 {
+		events, _ = json.Marshal(evs)
+	}
+	frame, err = encodeJPEG(e.RenderFrame(p))
+	return frame, events, err
 }
