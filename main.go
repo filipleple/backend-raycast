@@ -55,6 +55,7 @@ func main() {
 
 	//game routes
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
+	http.Handle("/ost/", http.StripPrefix("/ost/", http.FileServer(http.Dir("./ost/"))))
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleWS(w, r, db, engine)
@@ -95,7 +96,7 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB, engine *game.E
 	if err != nil {
 		avatarBytes = nil
 	}
-	player := engine.Join(user.ID, avatarBytes)
+	player := engine.Join(user.ID, user.Username, avatarBytes)
 
 	session := &Session{
 		wsConn:   ws,

@@ -52,10 +52,10 @@ func newTestEngine(t *testing.T) *Engine {
 
 func TestEngineTickProducesFrames(t *testing.T) {
 	e := newTestEngine(t)
-	p := e.Join(1, nil)
+	p := e.Join(1, "tester", nil)
 	defer e.Leave(p)
 
-	frame, err := e.Tick(p, map[string]bool{})
+	frame, _, err := e.Tick(p, map[string]bool{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestEngineTickProducesFrames(t *testing.T) {
 		t.Fatalf("frame is %dx%d, want %dx%d", b.Dx(), b.Dy(), ScreenW, ScreenH)
 	}
 
-	turned, err := e.Tick(p, keys("ArrowRight"))
+	turned, _, err := e.Tick(p, keys("ArrowRight"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestEngineTickProducesFrames(t *testing.T) {
 
 func TestPlayerCollidesWithWalls(t *testing.T) {
 	e := newTestEngine(t)
-	p := e.Join(1, nil)
+	p := e.Join(1, "tester", nil)
 	defer e.Leave(p)
 
 	m := p.CurrentMap
@@ -104,7 +104,7 @@ func TestDumpFrames(t *testing.T) {
 
 	for _, seq := range frameSequences {
 		e := newTestEngine(t)
-		p := e.Join(1, nil)
+		p := e.Join(1, "tester", nil)
 		for _, k := range seq.ticks {
 			e.Step(p, k)
 		}
@@ -113,8 +113,8 @@ func TestDumpFrames(t *testing.T) {
 
 	// two players: p2 idles at spawn, p1 backs away and looks at it
 	e := newTestEngine(t)
-	p1 := e.Join(1, nil)
-	e.Join(2, nil)
+	p1 := e.Join(1, "tester", nil)
+	e.Join(2, "tester", nil)
 	for i := 0; i < 5; i++ {
 		e.Step(p1, keys("ArrowDown"))
 	}

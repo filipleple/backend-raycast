@@ -2,7 +2,13 @@
 <html>
 <body style="display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#000">
 
-<canvas id="screen" width="320" height="240" style="width:640px;height:480px;image-rendering:pixelated"></canvas>
+<div id="stage" style="position:relative">
+    <canvas id="screen" width="320" height="240" style="width:640px;height:480px;image-rendering:pixelated"></canvas>
+    <div id="popup" style="display:none;position:absolute;left:50%;top:18%;transform:translateX(-50%);
+        max-width:90%;padding:10px 22px;background:rgba(10,5,30,.85);border:2px solid #d4af37;border-radius:4px;
+        color:#ffe9a0;font:18px monospace;text-align:center;white-space:pre-wrap;pointer-events:none;
+        text-shadow:0 0 6px #d4af37"></div>
+</div>
 
 <script>
 const canvas = document.getElementById("screen");
@@ -23,6 +29,137 @@ fetch("/me").then(res => {
     startGame();
 });
 
+// ---------------------------------------------------------------------------
+// AudioEngine — all playback happens here in the browser; the server only
+// sends tiny JSON events ("play M0002, fade 1500ms"). Browsers refuse to make
+// noise before a user gesture, so everything queues until the first keydown.
+// ---------------------------------------------------------------------------
+const audio = {
+    ctx: null,
+    unlocked: false,
+    buffers: {},          // url -> Promise<AudioBuffer>
+    music: null,          // {id, src, gain}
+    musicSeq: 0,          // guards against out-of-order async loads
+    pendingMusic: null,   // last music event seen while still locked
+
+    unlock() {
+        if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+        this.ctx.resume();
+        if (!this.unlocked) {
+            this.unlocked = true;
+            if (this.pendingMusic) { const ev = this.pendingMusic; this.pendingMusic = null; this.setMusic(ev); }
+        }
+    },
+
+    buffer(url) {
+        if (!this.buffers[url]) {
+            this.buffers[url] = fetch(url)
+                .then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.arrayBuffer(); })
+                .then(b => this.ctx.decodeAudioData(b));
+            this.buffers[url].catch(e => { console.error("audio load failed:", e); delete this.buffers[url]; });
+        }
+        return this.buffers[url];
+    },
+
+    async setMusic(ev) {
+        if (!this.unlocked) { this.pendingMusic = ev; return; }
+        if (this.music && this.music.id === ev.id) return;
+        const seq = ++this.musicSeq;
+        const fade = (ev.fade ?? 1500) / 1000;
+        const now = this.ctx.currentTime;
+
+        if (this.music) { // fade the old track out and stop it
+            const old = this.music;
+            this.music = null;
+            old.gain.gain.cancelScheduledValues(now);
+            old.gain.gain.setValueAtTime(old.gain.gain.value, now);
+            old.gain.gain.linearRampToValueAtTime(0, now + fade);
+            setTimeout(() => { try { old.src.stop(); } catch (e) {} }, fade * 1000 + 100);
+        }
+        if (!ev.file) return; // silence zone
+
+        const buf = await this.buffer(ev.file).catch(() => null);
+        if (!buf || seq !== this.musicSeq) return; // superseded while loading
+
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        src.loop = ev.loop ?? true;
+        const gain = this.ctx.createGain();
+        const t = this.ctx.currentTime;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(ev.volume ?? 1, t + fade);
+        src.connect(gain).connect(this.ctx.destination);
+        src.start();
+        this.music = { id: ev.id, src, gain };
+    },
+
+    async playSound(ev) {
+        if (!this.unlocked) return;
+        const buf = await this.buffer(ev.file).catch(() => null);
+        if (!buf) return;
+        const src = this.ctx.createBufferSource();
+        src.buffer = buf;
+        const gain = this.ctx.createGain();
+        gain.gain.value = ev.vol ?? 1;
+        let node = gain;
+        if (ev.pan && this.ctx.createStereoPanner) {
+            const pan = this.ctx.createStereoPanner();
+            pan.pan.value = Math.max(-1, Math.min(1, ev.pan));
+            gain.connect(pan); node = pan;
+        }
+        src.connect(gain); node.connect(this.ctx.destination);
+        src.start();
+    },
+
+    tone(ev) { // synthesized beep — scripts can make noise with zero assets
+        if (!this.unlocked) return;
+        const t = this.ctx.currentTime + (ev.delay ?? 0) / 1000, dur = (ev.ms ?? 200) / 1000;
+        const osc = this.ctx.createOscillator();
+        osc.type = ev.wave ?? "sine";
+        osc.frequency.value = ev.freq ?? 440;
+        const gain = this.ctx.createGain();
+        gain.gain.setValueAtTime(ev.vol ?? 0.5, t);
+        gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+        osc.connect(gain).connect(this.ctx.destination);
+        osc.start(t);
+        osc.stop(t + dur);
+    },
+};
+
+// ---------------------------------------------------------------------------
+// Server event dispatch. One handler per "type"; unknown types are ignored,
+// so server scripts can invent new ones (see scripts/README.md). ctx.send() /
+// ctx.js() on the server land here.
+// ---------------------------------------------------------------------------
+let popupTimer = null;
+function showPopup(ev) {
+    const el = document.getElementById("popup");
+    if (ev.html) el.innerHTML = ev.text; else el.textContent = ev.text;
+    el.style.display = "block";
+    clearTimeout(popupTimer);
+    popupTimer = setTimeout(() => { el.style.display = "none"; }, ev.ms ?? 3000);
+}
+
+const HANDLERS = {
+    music: ev => audio.setMusic(ev),
+    sound: ev => audio.playSound(ev),
+    tone:  ev => audio.tone(ev),
+    popup: ev => showPopup(ev),
+    // Yes, the server can run arbitrary JS here. Server scripts are trusted
+    // (they already control everything you see); this is the escape hatch
+    // that keeps the client extensible without touching this file.
+    eval:  ev => new Function(ev.js)(),
+};
+
+function handleEvents(json) {
+    let events;
+    try { events = JSON.parse(json); } catch (e) { console.error("bad event frame:", e); return; }
+    for (const ev of events) {
+        try { HANDLERS[ev.type]?.(ev); }
+        catch (e) { console.error(`event ${ev.type} handler failed:`, e); }
+    }
+}
+
 function startGame() {
     const inputState = {};
     const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -31,6 +168,7 @@ function startGame() {
     ws.binaryType = "blob";
 
     window.addEventListener("keydown", (e) => {
+        audio.unlock(); // browsers allow audio only after a user gesture
         inputState[e.key] = true;
     });
 
@@ -45,6 +183,10 @@ function startGame() {
     }, 50);
 
     ws.onmessage = async (event) => {
+        if (typeof event.data === "string") { // text frame = JSON control events
+            handleEvents(event.data);
+            return;
+        }
         const bitmap = await createImageBitmap(event.data);
         ctx.drawImage(bitmap, 0, 0);
         bitmap.close();

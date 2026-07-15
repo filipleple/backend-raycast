@@ -4,6 +4,7 @@ import "math"
 
 // step applies one tick of input to p. Caller must hold the write lock.
 func (e *Engine) step(p *Player, inputs map[string]bool) {
+	e.scripts.maybeReload()
 	m := p.CurrentMap
 
 	if inputs["ArrowLeft"] {
@@ -44,6 +45,8 @@ func (e *Engine) step(p *Player, inputs map[string]bool) {
 				p.X, p.Y = connDoor.ExitA[0], connDoor.ExitA[1]
 			}
 		}
+
+		e.scripts.fireUse(e, p, dirX, dirY)
 
 		lookCol := int((p.X + dirX*m.TileSize*0.7) / m.TileSize)
 		lookRow := int((p.Y + dirY*m.TileSize*0.7) / m.TileSize)
@@ -113,4 +116,16 @@ func (e *Engine) step(p *Player, inputs map[string]bool) {
 	p.X = newX
 	p.Y = newY
 	p.prevInputs = inputs
+
+	// --- scripts + music (position is final for this tick) ---
+	m = p.CurrentMap
+	col, row := int(p.X/m.TileSize), int(p.Y/m.TileSize)
+	if col != p.prevCol || row != p.prevRow {
+		p.prevCol, p.prevRow = col, row
+		if col >= 0 && col < m.Cols && row >= 0 && row < m.Rows {
+			e.scripts.fireEnter(e, p, col, row)
+		}
+	}
+	e.updateMusic(p)
+	e.scripts.fireTicks(e)
 }
