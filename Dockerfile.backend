@@ -10,7 +10,9 @@ WORKDIR /app
 COPY --from=builder /app/server .
 COPY static/ ./static/
 COPY textures/ ./textures/
-COPY hatman.gif definitions.csv map.csv TILES.csv ./
+COPY ost/ ./ost/
+COPY scripts/ ./scripts/
+COPY hatman.gif definitions.csv map.csv TILES.csv MUSIC.csv MUSIC_DEFS.csv ./
 EXPOSE 8080
 CMD ["./server"]
 
