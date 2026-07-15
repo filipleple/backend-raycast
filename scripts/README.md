@@ -18,6 +18,8 @@ onEnter("0204", ctx => {          // any water tile (id from definitions.csv)
 
 `blessed.js` in this folder is the reference example.
 
+![](bless.png)
+
 ## ELI5: how do events work?
 
 The game is a clock that ticks 10 times a second. On every tick, for every

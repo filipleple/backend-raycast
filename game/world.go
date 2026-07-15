@@ -85,7 +85,7 @@ type Engine struct {
 }
 
 // NewEngine loads definitions, the tile map and all referenced textures from
-// root (the directory holding definitions.csv, TILES.csv/map.csv, textures/
+// root (the directory holding definitions.csv, TILES.csv, textures/
 // and hatman.gif).
 func NewEngine(root string) (*Engine, error) {
 	defs, err := loadDefinitions(filepath.Join(root, "definitions.csv"))
@@ -113,13 +113,13 @@ func NewEngine(root string) (*Engine, error) {
 	return e, nil
 }
 
-// mapPath prefers the split-format TILES.csv and falls back to map.csv.
+// mapPath consumes the split-format TILES.csv
 func (e *Engine) mapPath() string {
 	tiles := filepath.Join(e.root, "TILES.csv")
 	if _, err := os.Stat(tiles); err == nil {
 		return tiles
 	}
-	return filepath.Join(e.root, "map.csv")
+	return filepath.Join(e.root, "map.csv") // obsolete, will error, should never happen
 }
 
 func (e *Engine) buildMap() (*Map, error) {
