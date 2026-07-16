@@ -24,6 +24,7 @@ type User struct {
 	Username  string `json:"username"`
 	Password  string `json:"password,omitempty"`
 	AvatarURL string `json:"avatar_url,omitempty"`
+	IsAdmin   bool   `json:"is_admin"`
 }
 
 type Credentials struct {
@@ -59,11 +60,11 @@ func getUserBySessionCookie(db *sql.DB, r *http.Request) (User, error) {
 
 	var user User
 	err = db.QueryRow(`
-		SELECT u.id, u.username, u.password
+		SELECT u.id, u.username, u.password, u.is_admin
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token = $1
-	`, token).Scan(&user.ID, &user.Username, &user.Password)
+	`, token).Scan(&user.ID, &user.Username, &user.Password, &user.IsAdmin)
 	if err != nil {
 		return User{}, err
 	}

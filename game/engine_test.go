@@ -43,7 +43,7 @@ func ticks(n int, k map[string]bool) []map[string]bool {
 
 func newTestEngine(t *testing.T) *Engine {
 	t.Helper()
-	e, err := NewEngine("..")
+	e, err := NewEngine("../content")
 	if err != nil {
 		t.Fatal(err)
 	}

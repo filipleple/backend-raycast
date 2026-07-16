@@ -7,3 +7,8 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:18080:8080"
+    volumes:
+      # A dedicated content git checkout on the host (seed once:
+      #   git clone <content-repo> /srv/raycast-content
+      # or copy the repo's ./content there). The admin panel commits into it.
+      - /srv/raycast-content:/app/content

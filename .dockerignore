@@ -4,3 +4,5 @@ venv/
 db/
 Dockerfile*
 docker-compose.yml
+# content is bind-mounted at runtime, never baked into the image
+content/

@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>raycast admin</title>
+<style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #0b0d12; color: #d7dae0;
+           font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    main { max-width: 820px; margin: 0 auto; padding: 24px 18px 80px; }
+    h1 { font-size: 20px; color: #ffe9a0; margin: 0 0 4px; }
+    h2 { font-size: 14px; text-transform: uppercase; letter-spacing: .08em;
+         color: #8b93a7; margin: 28px 0 10px; border-bottom: 1px solid #222634; padding-bottom: 6px; }
+    section { background: #12151d; border: 1px solid #222634; border-radius: 8px; padding: 16px; }
+    label { display: block; color: #8b93a7; margin: 8px 0 2px; }
+    input, select { background: #0b0d12; border: 1px solid #2a2f3d; color: #d7dae0;
+                    border-radius: 5px; padding: 7px 9px; font: inherit; width: 100%; box-sizing: border-box; }
+    button { background: #d4af37; color: #14161c; border: 0; border-radius: 5px;
+             padding: 9px 16px; font: inherit; font-weight: 700; cursor: pointer; margin-top: 12px; }
+    button.ghost { background: #222634; color: #d7dae0; }
+    button:disabled { opacity: .5; cursor: default; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color: #6b7386; }
+    table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+    th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid #1c2029; font-size: 13px; vertical-align: top; }
+    th { color: #8b93a7; font-weight: 600; }
+    .sha { color: #7fd1ae; }
+    .active { color: #ffe9a0; }
+    #toast { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%);
+             max-width: 90%; padding: 10px 18px; border-radius: 6px; display: none;
+             white-space: pre-wrap; box-shadow: 0 6px 24px rgba(0,0,0,.5); }
+    #toast.ok { background: #17361f; border: 1px solid #2f7d43; color: #b7f0c4; }
+    #toast.err { background: #3a1717; border: 1px solid #7d2f2f; color: #f0b7b7; }
+    a { color: #8ab4ff; }
+</style>
+</head>
+<body>
+<main>
+    <h1>raycast content admin</h1>
+    <div class="muted" id="statusline">loading…</div>
+
+    <h2>Google Sheets sources</h2>
+    <section>
+        <div class="muted">One row per content file. Paste the spreadsheet ID (the long id in
+            the sheet URL) and each tab's <b>gid</b> (the <code>#gid=…</code> number). The sheet must be
+            shared &ldquo;anyone with the link can view&rdquo;.</div>
+        <div id="sources"></div>
+        <button id="saveSources" class="ghost">Save sources</button>
+    </section>
+
+    <h2>Sync</h2>
+    <section>
+        <div class="muted">Fetch every tab, validate it loads, commit, and hot-reload the live game.
+            Broken content is rejected and nothing changes.</div>
+        <button id="syncBtn">Sync from Sheets &amp; reload</button>
+    </section>
+
+    <h2>Upload asset</h2>
+    <section>
+        <div class="row">
+            <div>
+                <label for="kind">Kind</label>
+                <select id="kind">
+                    <option value="walls">texture / walls</option>
+                    <option value="floors+ceilings">texture / floors+ceilings</option>
+                    <option value="door">texture / door</option>
+                    <option value="sprites">texture / sprites</option>
+                    <option value="ost">music or sound (ost)</option>
+                </select>
+            </div>
+            <div>
+                <label for="assetFile">File</label>
+                <input id="assetFile" type="file">
+            </div>
+        </div>
+        <button id="uploadBtn">Upload &amp; reload</button>
+    </section>
+
+    <h2>Revisions</h2>
+    <section>
+        <div class="muted">Every sync/upload is a commit. Roll back to restore that content live.</div>
+        <table id="revs"><thead><tr><th>when</th><th>rev</th><th>by</th><th>what</th><th></th></tr></thead>
+            <tbody></tbody></table>
+    </section>
+</main>
+<div id="toast"></div>
+
+<script>
+// API base = wherever this page is served (handles a reverse-proxy path prefix
+// like /myapp/admin). Endpoints hang off it: `${API}/status`, `${API}/sync/sheets`.
+const API = location.pathname.replace(/\/$/, "");
+const TARGETS = ["definitions.csv", "TILES.csv", "MUSIC.csv", "MUSIC_DEFS.csv"];
+
+function toast(msg, ok) {
+    const t = document.getElementById("toast");
+    t.textContent = msg;
+    t.className = ok ? "ok" : "err";
+    t.style.display = "block";
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => { t.style.display = "none"; }, ok ? 4000 : 8000);
+}
+
+async function api(path, opts) {
+    const res = await fetch(`${API}${path}`, opts);
+    let body = {};
+    try { body = await res.json(); } catch (e) {}
+    if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+}
+
+async function loadStatus() {
+    try {
+        const s = await api("/status");
+        document.getElementById("statusline").textContent =
+            `content: ${s.content_dir}  •  git: ${s.git ? "on" : "OFF (versioning disabled)"}` +
+            (s.head ? `  •  HEAD ${s.head.slice(0, 12)}` : "") +
+            `  •  players online: ${s.players.length}`;
+    } catch (e) { toast(e.message, false); }
+}
+
+async function loadSources() {
+    const wrap = document.getElementById("sources");
+    let data = { sources: {} };
+    try { data = await api("/sources"); } catch (e) { toast(e.message, false); }
+    wrap.innerHTML = "";
+    for (const f of TARGETS) {
+        const s = data.sources[f] || { sheet_id: "", gid: "" };
+        const div = document.createElement("div");
+        div.className = "row";
+        div.innerHTML =
+            `<div><label>${f} — spreadsheet id</label>
+                 <input data-f="${f}" data-k="sheet_id" value="${s.sheet_id || ""}"></div>
+             <div><label>${f} — gid</label>
+                 <input data-f="${f}" data-k="gid" value="${s.gid || ""}"></div>`;
+        wrap.appendChild(div);
+    }
+}
+
+document.getElementById("saveSources").onclick = async () => {
+    const body = {};
+    for (const f of TARGETS) body[f] = { sheet_id: "", gid: "" };
+    document.querySelectorAll("#sources input").forEach(i => {
+        body[i.dataset.f][i.dataset.k] = i.value.trim();
+    });
+    try {
+        await api("/sources", { method: "POST", headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify(body) });
+        toast("sources saved", true);
+    } catch (e) { toast(e.message, false); }
+};
+
+document.getElementById("syncBtn").onclick = async (ev) => {
+    ev.target.disabled = true;
+    try {
+        const r = await api("/sync/sheets", { method: "POST" });
+        toast((r.message || "synced") + (r.revision ? `\nrev ${r.revision.slice(0, 12)}` : "") +
+              (r.warning ? `\n⚠ ${r.warning}` : ""), true);
+        loadRevisions(); loadStatus();
+    } catch (e) { toast(e.message, false); }
+    finally { ev.target.disabled = false; }
+};
+
+document.getElementById("uploadBtn").onclick = async (ev) => {
+    const file = document.getElementById("assetFile").files[0];
+    if (!file) { toast("pick a file first", false); return; }
+    const fd = new FormData();
+    fd.append("kind", document.getElementById("kind").value);
+    fd.append("file", file);
+    ev.target.disabled = true;
+    try {
+        const r = await api("/assets/upload", { method: "POST", body: fd });
+        toast((r.message || "uploaded") + (r.warning ? `\n⚠ ${r.warning}` : ""), true);
+        loadRevisions();
+    } catch (e) { toast(e.message, false); }
+    finally { ev.target.disabled = false; }
+};
+
+async function loadRevisions() {
+    const tb = document.querySelector("#revs tbody");
+    tb.innerHTML = "";
+    let data = { revisions: [] };
+    try { data = await api("/revisions"); } catch (e) { toast(e.message, false); return; }
+    if (!data.git) {
+        tb.innerHTML = `<tr><td colspan="5" class="muted">content dir is not a git repo — versioning off</td></tr>`;
+        return;
+    }
+    for (const rv of data.revisions || []) {
+        const tr = document.createElement("tr");
+        const when = new Date(rv.when * 1000).toLocaleString();
+        tr.innerHTML =
+            `<td>${when}</td>
+             <td class="sha ${rv.active ? "active" : ""}">${rv.sha.slice(0, 10)}${rv.active ? " ●" : ""}</td>
+             <td>${rv.author}</td>
+             <td>${rv.subject}</td>
+             <td></td>`;
+        if (!rv.active) {
+            const b = document.createElement("button");
+            b.textContent = "roll back";
+            b.className = "ghost";
+            b.style.margin = "0";
+            b.onclick = async () => {
+                if (!confirm(`Roll back to ${rv.sha.slice(0, 10)} and reload the live game?`)) return;
+                try {
+                    await api("/rollback", { method: "POST", headers: { "Content-Type": "application/json" },
+                                             body: JSON.stringify({ sha: rv.sha }) });
+                    toast("rolled back", true); loadRevisions(); loadStatus();
+                } catch (e) { toast(e.message, false); }
+            };
+            tr.lastElementChild.appendChild(b);
+        }
+        tb.appendChild(tr);
+    }
+}
+
+loadStatus(); loadSources(); loadRevisions();
+</script>
+</body>
+</html>

@@ -6,13 +6,17 @@ COPY . .
 RUN go build -o server .
 
 FROM alpine:latest
+# git: the content directory is a git repo the admin panel commits to on each
+# sync/upload and checks out on rollback.
+RUN apk add --no-cache git
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY static/ ./static/
-COPY textures/ ./textures/
-COPY ost/ ./ost/
-COPY scripts/ ./scripts/
-COPY hatman.gif definitions.csv TILES.csv MUSIC.csv MUSIC_DEFS.csv ./
+# The admin panel (templates/admin.html) is embedded into the binary via
+# go:embed. Game content is NOT baked in — it lives in a git-versioned
+# directory bind-mounted at /app/content (CONTENT_DIR) and hot-reloaded at
+# runtime, so content changes never require an image rebuild. See
+# docker-compose.yml.
 EXPOSE 8080
 CMD ["./server"]
 

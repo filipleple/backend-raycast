@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"log"
 	"net/http"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"raycast/game"
@@ -25,9 +27,27 @@ func main() {
 	db := connectPostgresDB()
 	defer db.Close()
 
-	engine, err := game.NewEngine(".")
+	// Content (maps, defs, music, textures, scripts) is read from CONTENT_DIR,
+	// a git-versioned directory mounted at runtime rather than baked into the
+	// image — so the admin panel can sync + hot-reload it without a redeploy.
+	// Defaults to ./content so bare `go run .` works from the repo root.
+	contentDir := os.Getenv("CONTENT_DIR")
+	if contentDir == "" {
+		contentDir = "./content"
+	}
+
+	engine, err := game.NewEngine(contentDir)
 	if err != nil {
 		log.Fatal("loading game assets: ", err)
+	}
+
+	// Optionally promote a bootstrap admin on startup (idempotent).
+	if u := os.Getenv("ADMIN_USERNAME"); u != "" {
+		if _, err := db.Exec("UPDATE users SET is_admin = true WHERE username = $1", u); err != nil {
+			log.Printf("admin bootstrap for %q failed: %v", u, err)
+		} else {
+			log.Printf("ensured %q is admin", u)
+		}
 	}
 
 	// auth routes
@@ -53,9 +73,12 @@ func main() {
 		meHandle(w, r, db)
 	})
 
+	// admin panel (content sync + live reload); gated to admin users inside
+	newAdminServer(db, engine, contentDir).routes()
+
 	//game routes
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
-	http.Handle("/ost/", http.StripPrefix("/ost/", http.FileServer(http.Dir("./ost/"))))
+	http.Handle("/ost/", http.StripPrefix("/ost/", http.FileServer(http.Dir(filepath.Join(contentDir, "ost")))))
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleWS(w, r, db, engine)

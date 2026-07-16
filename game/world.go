@@ -84,46 +84,41 @@ type Engine struct {
 	scripts   *scriptHost
 }
 
-// NewEngine loads definitions, the tile map and all referenced textures from
-// root (the directory holding definitions.csv, TILES.csv, textures/
-// and hatman.gif).
+// NewEngine loads all content under root (the directory holding
+// definitions.csv, TILES.csv/map.csv, MUSIC*.csv, textures/, hatman.gif and
+// scripts/) and assembles a ready-to-run engine. See LoadContent (content.go)
+// for the loading + validation; ReloadContent hot-swaps it at runtime.
 func NewEngine(root string) (*Engine, error) {
-	defs, err := loadDefinitions(filepath.Join(root, "definitions.csv"))
+	c, err := LoadContent(root)
 	if err != nil {
 		return nil, err
 	}
-	musicDefs, err := loadMusicDefs(filepath.Join(root, "MUSIC_DEFS.csv"))
-	if err != nil {
-		return nil, err
+	e := &Engine{
+		root:      root,
+		defs:      c.defs,
+		musicDefs: c.musicDefs,
+		world:     &World{Maps: []*Map{c.baseMap}},
+		renderer:  newRenderer(c.sprite),
 	}
-	e := &Engine{root: root, defs: defs, musicDefs: musicDefs}
-
-	m, err := e.buildMap()
-	if err != nil {
-		return nil, err
-	}
-	e.world = &World{Maps: []*Map{m}}
 	e.scripts = newScriptHost(filepath.Join(root, "scripts"))
-
-	sprite, err := loadImageFile(filepath.Join(root, "hatman.gif"))
-	if err != nil {
-		return nil, err
-	}
-	e.renderer = newRenderer(textureFromImage(sprite, true))
 	return e, nil
 }
 
 // mapPath consumes the split-format TILES.csv
-func (e *Engine) mapPath() string {
-	tiles := filepath.Join(e.root, "TILES.csv")
+func mapPath(root string) string {
+	tiles := filepath.Join(root, "TILES.csv")
 	if _, err := os.Stat(tiles); err == nil {
 		return tiles
 	}
-	return filepath.Join(e.root, "map.csv") // obsolete, will error, should never happen
+	return filepath.Join(root, "map.csv") // obsolete, will error, should never happen
 }
 
-func (e *Engine) buildMap() (*Map, error) {
-	grid, doorPositions, cols, rows, err := loadMapCSV(e.mapPath(), e.defs)
+// buildMap loads the tile map + music zones under root, resolving cells through
+// defs and loading every referenced texture. It is a free function (not an
+// Engine method) so a content reload can build a map from freshly loaded defs
+// before those defs are swapped onto the engine.
+func buildMap(root string, defs map[string]Def) (*Map, error) {
+	grid, doorPositions, cols, rows, err := loadMapCSV(mapPath(root), defs)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +130,7 @@ func (e *Engine) buildMap() (*Map, error) {
 		DoorCells:   makeCSVDoors(doorPositions, grid, cols, rows, TileSize),
 		PortalDoors: map[[2]int]*PortalDoor{},
 	}
-	zones, err := loadMusicCSV(filepath.Join(e.root, "MUSIC.csv"), cols, rows)
+	zones, err := loadMusicCSV(filepath.Join(root, "MUSIC.csv"), cols, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -143,36 +138,40 @@ func (e *Engine) buildMap() (*Map, error) {
 
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
-			e.ensureSymbolTextures(m, grid[r][c])
+			ensureSymbolTextures(root, m, grid[r][c])
 		}
 	}
 	return m, nil
 }
 
+// buildMap rebuilds a fresh base map from the engine's current defs — used to
+// lazily materialize portal target rooms at runtime.
+func (e *Engine) buildMap() (*Map, error) { return buildMap(e.root, e.defs) }
+
 // ensureTexture loads name into m.Textures if not already present.
-func (e *Engine) ensureTexture(m *Map, name, preferred string, keepAlpha bool) {
+func ensureTexture(root string, m *Map, name, preferred string, keepAlpha bool) {
 	if name == "" {
 		return
 	}
 	if _, ok := m.Textures[name]; ok {
 		return
 	}
-	if t := loadTextureFile(filepath.Join(e.root, "textures"), name, preferred, keepAlpha); t != nil {
+	if t := loadTextureFile(filepath.Join(root, "textures"), name, preferred, keepAlpha); t != nil {
 		m.Textures[name] = t
 	}
 }
 
 // ensureSymbolTextures loads every texture sym references.
-func (e *Engine) ensureSymbolTextures(m *Map, sym Symbol) {
+func ensureSymbolTextures(root string, m *Map, sym Symbol) {
 	if sym.Wall && sym.TextureName != "" {
 		preferred := "walls"
 		if sym.Door {
 			preferred = "door"
 		}
-		e.ensureTexture(m, sym.TextureName, preferred, sym.Transparency)
+		ensureTexture(root, m, sym.TextureName, preferred, sym.Transparency)
 	}
-	e.ensureTexture(m, sym.FloorTexture, "floors+ceilings", false)
-	e.ensureTexture(m, sym.CeilingTexture, "floors+ceilings", false)
+	ensureTexture(root, m, sym.FloorTexture, "floors+ceilings", false)
+	ensureTexture(root, m, sym.CeilingTexture, "floors+ceilings", false)
 }
 
 // setCellLayer rewrites one layer of a cell through the definitions table,
@@ -195,7 +194,7 @@ func (e *Engine) setCellLayer(m *Map, col, row, layer int, id string) {
 	}
 	sym := makeSymbol(e.defs, c, w, f)
 	m.Grid[row][col] = sym
-	e.ensureSymbolTextures(m, sym)
+	ensureSymbolTextures(e.root, m, sym)
 
 	pos := [2]int{col, row}
 	delete(m.DoorCells, pos)

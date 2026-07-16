@@ -27,6 +27,37 @@ Create a GitHub personal access token with `write:packages` scope, then:
 echo "YOUR_TOKEN" | docker login ghcr.io -u YOUR_GITHUB_USERNAME --password-stdin
 ```
 
+### 3. Content volume (once)
+
+Game content is **not** baked into the image — it is a git-versioned directory
+bind-mounted at `/app/content` (see `docker-compose.prod.yml`, which mounts
+`/srv/raycast-content`). Seed it once on the VPS:
+
+```bash
+# a dedicated checkout the admin panel commits into
+git clone <your-content-repo> /srv/raycast-content
+# — or, to start from what's in this repo:
+#   cp -r backend-raycast/content /srv/raycast-content && git -C /srv/raycast-content init && \
+#   git -C /srv/raycast-content add -A && git -C /srv/raycast-content commit -m "seed content"
+```
+
+After this, content changes are made through the `/admin` panel (sync from
+Sheets, upload assets, roll back) and hot-reload live — **no image rebuild, no
+redeploy**. Only code changes go through build → push → pull.
+
+### 4. Database migrations
+
+`db/schema.sql` runs only on a **fresh** Postgres volume. Apply new migrations
+by hand to an existing DB, then restart the backend:
+
+```bash
+docker compose exec -T db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    < db/migrations/0001_admin_and_content_sources.sql
+# promote your admin (or set ADMIN_USERNAME in .env and restart the backend)
+docker compose exec db psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+    -c "UPDATE users SET is_admin = true WHERE username = 'you';"
+```
+
 ---
 
 ## Building and pushing (laptop)
