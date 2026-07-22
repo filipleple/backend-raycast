@@ -55,7 +55,7 @@ func TestEngineTickProducesFrames(t *testing.T) {
 	p := e.Join(1, "tester", nil)
 	defer e.Leave(p)
 
-	frame, _, err := e.Tick(p, map[string]bool{})
+	frame, _, err := e.Tick(p, map[string]bool{}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +67,7 @@ func TestEngineTickProducesFrames(t *testing.T) {
 		t.Fatalf("frame is %dx%d, want %dx%d", b.Dx(), b.Dy(), ScreenW, ScreenH)
 	}
 
-	turned, _, err := e.Tick(p, keys("ArrowRight"))
+	turned, _, err := e.Tick(p, keys("ArrowRight"), 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestPlayerCollidesWithWalls(t *testing.T) {
 
 	m := p.CurrentMap
 	for i := 0; i < 500; i++ {
-		e.Step(p, keys("ArrowUp"))
+		e.Step(p, keys("ArrowUp"), 0)
 		cx, cy := int(p.X/m.TileSize), int(p.Y/m.TileSize)
 		if cx < 0 || cx >= m.Cols || cy < 0 || cy >= m.Rows {
 			t.Fatalf("player escaped the map at tick %d: (%f, %f)", i, p.X, p.Y)
@@ -106,7 +106,7 @@ func TestDumpFrames(t *testing.T) {
 		e := newTestEngine(t)
 		p := e.Join(1, "tester", nil)
 		for _, k := range seq.ticks {
-			e.Step(p, k)
+			e.Step(p, k, 0)
 		}
 		writePNG(t, filepath.Join(dir, "go_"+seq.name+".png"), e, p)
 	}
@@ -116,7 +116,7 @@ func TestDumpFrames(t *testing.T) {
 	p1 := e.Join(1, "tester", nil)
 	e.Join(2, "tester", nil)
 	for i := 0; i < 5; i++ {
-		e.Step(p1, keys("ArrowDown"))
+		e.Step(p1, keys("ArrowDown"), 0)
 	}
 	writePNG(t, filepath.Join(dir, "go_sprite.png"), e, p1)
 }

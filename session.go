@@ -16,8 +16,9 @@ type Session struct {
 	engine *game.Engine
 	player *game.Player
 
-	mu    sync.RWMutex
-	input map[string]bool
+	mu      sync.RWMutex
+	input   map[string]bool
+	mouseDX float64 // accumulated mouse yaw (screen px) since last tick
 
 	done     chan struct{}
 	userID   int
@@ -43,15 +44,18 @@ func (s *Session) tickLoop() {
 		case <-ticker.C:
 		}
 
-		// snapshot input
-		s.mu.RLock()
+		// snapshot input; drain the accumulated mouse delta so each tick
+		// consumes exactly the movement reported since the previous tick
+		s.mu.Lock()
 		snapshot := make(map[string]bool, len(s.input))
 		for k, v := range s.input {
 			snapshot[k] = v
 		}
-		s.mu.RUnlock()
+		turnDelta := s.mouseDX
+		s.mouseDX = 0
+		s.mu.Unlock()
 
-		frame, events, err := s.engine.Tick(s.player, snapshot)
+		frame, events, err := s.engine.Tick(s.player, snapshot, turnDelta)
 		if err != nil {
 			return
 		}
@@ -88,15 +92,21 @@ func (s *Session) readWS() {
 			return
 		}
 
-		var incoming map[string]bool
+		var incoming struct {
+			Keys map[string]bool `json:"keys"`
+			MDX  float64         `json:"mdx"`
+		}
 		if err := json.Unmarshal(msg, &incoming); err != nil {
 			continue
 		}
 
 		s.mu.Lock()
-		for k, v := range incoming {
+		for k, v := range incoming.Keys {
 			s.input[k] = v
 		}
+		// deltas accumulate: the browser sends at ~2x the tick rate, so
+		// several frames' movement sums between ticks
+		s.mouseDX += incoming.MDX
 		s.mu.Unlock()
 	}
 }

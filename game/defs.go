@@ -14,6 +14,8 @@ type Def struct {
 	Wall         bool
 	Floor        bool
 	Door         bool
+	Picture      bool   // wall face is a framed picture
+	Frame        string // frame-overlay texture name ("" -> default frame)
 }
 
 // fallbackDef is used for IDs missing from definitions.csv: invisible,
@@ -29,7 +31,11 @@ func loadDefinitions(path string) (map[string]Def, error) {
 	}
 	defer f.Close()
 
-	rows, err := csv.NewReader(f).ReadAll()
+	// tolerate ragged rows: the optional picture/frame columns may be absent
+	// from older rows or an out-of-date sheet (see cell() below)
+	r := csv.NewReader(f)
+	r.FieldsPerRecord = -1
+	rows, err := r.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("definitions %s: %w", path, err)
 	}
@@ -47,6 +53,15 @@ func loadDefinitions(path string) (map[string]Def, error) {
 		}
 	}
 
+	// picture/frame are optional columns — an out-of-date sheet without them
+	// still loads (defaulting to non-picture tiles).
+	cell := func(row []string, name string) string {
+		if i, ok := col[name]; ok && i < len(row) {
+			return row[i]
+		}
+		return ""
+	}
+
 	defs := make(map[string]Def, len(rows)-1)
 	for _, row := range rows[1:] {
 		defs[row[col["id"]]] = Def{
@@ -56,6 +71,8 @@ func loadDefinitions(path string) (map[string]Def, error) {
 			Wall:         row[col["wall"]] == "1",
 			Floor:        row[col["floor"]] == "1",
 			Door:         row[col["door"]] == "1",
+			Picture:      cell(row, "picture") == "1",
+			Frame:        cell(row, "frame"),
 		}
 	}
 	return defs, nil

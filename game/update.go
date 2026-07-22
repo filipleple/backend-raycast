@@ -3,7 +3,8 @@ package game
 import "math"
 
 // step applies one tick of input to p. Caller must hold the write lock.
-func (e *Engine) step(p *Player, inputs map[string]bool) {
+// turnDelta is accumulated mouse movementX for this tick (screen px).
+func (e *Engine) step(p *Player, inputs map[string]bool, turnDelta float64) {
 	e.scripts.maybeReload()
 	m := p.CurrentMap
 
@@ -13,6 +14,7 @@ func (e *Engine) step(p *Player, inputs map[string]bool) {
 	if inputs["ArrowRight"] {
 		p.Angle += TurnSpeed
 	}
+	p.Angle += turnDelta * MouseSensitivity
 
 	dirX, dirY := math.Cos(p.Angle), math.Sin(p.Angle)
 	rightX, rightY := -dirY, dirX

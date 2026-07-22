@@ -41,7 +41,7 @@ func TestChapelZoneAndBlessing(t *testing.T) {
 	const col, row = 55, 18
 	p.X, p.Y = (col+0.5)*TileSize, (row+0.5)*TileSize
 
-	e.Step(p, map[string]bool{}) // cell change detected here -> onEnter fires
+	e.Step(p, map[string]bool{}, 0) // cell change detected here -> onEnter fires
 	evs := drainTypes(t, e, p)
 	if len(evs["popup"]) == 0 {
 		t.Fatal("no popup after entering the trigger tile — blessed.js did not fire")
@@ -51,7 +51,7 @@ func TestChapelZoneAndBlessing(t *testing.T) {
 	}
 
 	for i := 0; i < musicHysteresisTicks; i++ {
-		e.Step(p, map[string]bool{})
+		e.Step(p, map[string]bool{}, 0)
 	}
 	evs = drainTypes(t, e, p)
 	if len(evs["music"]) == 0 {

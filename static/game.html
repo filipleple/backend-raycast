@@ -162,6 +162,7 @@ function handleEvents(json) {
 
 function startGame() {
     const inputState = {};
+    let mouseDX = 0; // mouse yaw accumulated since the last WS send
     const proto = location.protocol === "https:" ? "wss" : "ws";
     const wsUrl = `${proto}://${location.host}${location.pathname.replace(/\/[^/]*$/, "/ws")}`;
     const ws = new WebSocket(wsUrl);
@@ -176,9 +177,19 @@ function startGame() {
         inputState[e.key] = false;
     });
 
+    // click to capture the pointer for FPS-style mouse look (Esc releases)
+    canvas.addEventListener("click", () => {
+        audio.unlock();
+        if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
+    });
+    document.addEventListener("mousemove", (e) => {
+        if (document.pointerLockElement === canvas) mouseDX += e.movementX;
+    });
+
     setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify(inputState));
+            ws.send(JSON.stringify({ keys: inputState, mdx: mouseDX }));
+            mouseDX = 0;
         }
     }, 50);
 

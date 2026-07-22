@@ -20,8 +20,10 @@ type Symbol struct {
 	Transparency bool   // wall layer transparency
 	Wall         bool   // wall layer draws a pane
 	Door         bool   // wall layer is a door
+	Picture      bool   // wall layer is a framed picture
 	Walkable     bool   // wall walk_through AND floor walk_through
 
+	FrameTexture   string // frame overlay for picture cells ("" = none)
 	FloorTexture   string // "" for solid walls / untextured
 	CeilingTexture string
 }
@@ -61,6 +63,15 @@ func makeSymbol(defs map[string]Def, ceilingID, wallID, floorID string) Symbol {
 		}
 	}
 
+	// a picture cell overlays a frame; empty frame name falls back to "default"
+	var frameTex string
+	if wallDef.Picture {
+		frameTex = wallDef.Frame
+		if frameTex == "" {
+			frameTex = "default"
+		}
+	}
+
 	return Symbol{
 		WallID:         wallID,
 		FloorID:        floorID,
@@ -69,7 +80,9 @@ func makeSymbol(defs map[string]Def, ceilingID, wallID, floorID string) Symbol {
 		Transparency:   wallDef.Transparency,
 		Wall:           wallDef.Wall,
 		Door:           wallDef.Door,
+		Picture:        wallDef.Picture,
 		Walkable:       wallDef.WalkThrough && floorDef.WalkThrough,
+		FrameTexture:   frameTex,
 		FloorTexture:   floorTex,
 		CeilingTexture: ceilingTex,
 	}

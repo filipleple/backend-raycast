@@ -21,8 +21,12 @@ const (
 
 	TileSize     = 64.0
 	PlayerSpeed  = TileSize * 0.25 // world px per tick
-	TurnSpeed    = 0.1
-	PlayerMargin = TileSize * 0.2 // collision radius in world px
+	TurnSpeed    = 0.14            // radians per tick for arrow-key turning
+	PlayerMargin = TileSize * 0.2  // collision radius in world px
+
+	// MouseSensitivity converts accumulated mouse movementX (screen px) into
+	// radians of yaw per tick. Tune to taste.
+	MouseSensitivity = 0.003
 
 	jpegQuality = 60
 )
@@ -168,7 +172,14 @@ func ensureSymbolTextures(root string, m *Map, sym Symbol) {
 		if sym.Door {
 			preferred = "door"
 		}
+		if sym.Picture {
+			preferred = "pictures"
+		}
 		ensureTexture(root, m, sym.TextureName, preferred, sym.Transparency)
+	}
+	if sym.Picture && sym.FrameTexture != "" {
+		// keep alpha: the frame's transparent center lets the picture show through
+		ensureTexture(root, m, sym.FrameTexture, "frames", true)
 	}
 	ensureTexture(root, m, sym.FloorTexture, "floors+ceilings", false)
 	ensureTexture(root, m, sym.CeilingTexture, "floors+ceilings", false)
@@ -247,11 +258,12 @@ func (e *Engine) Leave(p *Player) {
 	}
 }
 
-// Step advances p by one input snapshot.
-func (e *Engine) Step(p *Player, keys map[string]bool) {
+// Step advances p by one input snapshot. turnDelta is accumulated mouse yaw
+// (screen px) applied on top of arrow-key turning.
+func (e *Engine) Step(p *Player, keys map[string]bool, turnDelta float64) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.step(p, keys)
+	e.step(p, keys, turnDelta)
 }
 
 // RenderFrame renders p's current view.
@@ -270,8 +282,8 @@ func (e *Engine) RenderFrame(p *Player) *image.NRGBA {
 // Tick is one session tick: apply the input snapshot, render p's view and
 // encode it for the wire. events is a JSON array of control messages for the
 // browser, or nil when there is nothing to say this tick.
-func (e *Engine) Tick(p *Player, keys map[string]bool) (frame, events []byte, err error) {
-	e.Step(p, keys)
+func (e *Engine) Tick(p *Player, keys map[string]bool, turnDelta float64) (frame, events []byte, err error) {
+	e.Step(p, keys, turnDelta)
 	if evs := e.DrainEvents(p); len(evs) > 0 {
 		events, _ = json.Marshal(evs)
 	}

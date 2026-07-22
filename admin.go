@@ -36,6 +36,8 @@ var assetKinds = map[string]struct {
 	"floors+ceilings": {"textures/floors+ceilings", isImage},
 	"door":            {"textures/door", isImage},
 	"sprites":         {"textures/sprites", isImage},
+	"pictures":        {"textures/pictures", isImage},
+	"frames":          {"textures/frames", isImage},
 	"ost":             {"ost", isAudio},
 }
 

@@ -36,7 +36,7 @@ func (t *Texture) At(x, y int) (r, g, b, a uint8) {
 	return t.Pix[i], t.Pix[i+1], t.Pix[i+2], t.Pix[i+3]
 }
 
-var textureSubdirs = [4]string{"walls", "doors", "floors", "misc"}
+var textureSubdirs = [6]string{"walls", "doors", "floors", "misc", "pictures", "frames"}
 
 // loadTextureFile finds a texture by name, checking the preferred subdir
 // first and falling back to the others (e.g. `grave` lives in misc/),
