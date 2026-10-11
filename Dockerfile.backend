@@ -10,8 +10,9 @@ RUN GOOS=js GOARCH=wasm go build -ldflags=-s -o static/engine.wasm ./cmd/client 
 
 FROM alpine:latest
 # git: the content directory is a git repo the admin panel commits to on each
-# sync/upload and checks out on rollback.
-RUN apk add --no-cache git
+# sync/upload and checks out on rollback. ca-certificates: the Department of
+# Vision gallery fetches images from https://629fm.com.
+RUN apk add --no-cache git ca-certificates
 WORKDIR /app
 COPY --from=builder /app/server .
 COPY --from=builder /app/static/ ./static/

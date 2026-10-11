@@ -48,12 +48,15 @@ func main() {
 	// Department of Vision gallery on the "dov" picture slots; off without a
 	// 629fm base URL (slots then show empty frames)
 	if api := os.Getenv("DOV_API_URL"); api != "" {
+		log.Printf("dov: gallery from %s", api)
 		go engine.RunDoV(context.Background(), game.DovConfig{
 			APIURL: api,
 			WebURL: os.Getenv("DOV_WEB_URL"),
 			Poll:   envSeconds("DOV_POLL_SECONDS", 300),
 			Rotate: envSeconds("DOV_ROTATE_SECONDS", 60),
 		})
+	} else {
+		log.Print("dov: DOV_API_URL not set, gallery walls stay empty")
 	}
 
 	// Optionally promote a bootstrap admin on startup (idempotent).
