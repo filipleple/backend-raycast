@@ -1,5 +1,6 @@
 #!/bin/bash
 set -e
+GHCR_USER=filipleple
 
 : ${GHCR_USER:?please set GHCR_USER}
 NS="ghcr.io/$GHCR_USER"
