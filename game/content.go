@@ -71,6 +71,7 @@ func (e *Engine) ReloadContent() error {
 	e.world.Maps = []*Map{c.baseMap} // drop any lazily built portal maps
 	e.renderer = newRenderer(c.sprite)
 	e.scripts.reload()
+	e.pictureViews = map[string][]byte{}
 
 	// Every live player caches a *Map pointer and an absolute pixel position
 	// that a new grid can invalidate — a formerly walkable cell may now be a

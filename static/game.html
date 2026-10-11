@@ -10,6 +10,13 @@
         text-shadow:0 0 6px #d4af37"></div>
 </div>
 
+<!-- full-screen picture viewer (Space on a painting); Space/Esc/click closes -->
+<div id="viewer" style="display:none;position:fixed;inset:0;z-index:10;background:rgba(0,0,0,.88);
+    justify-content:center;align-items:center;cursor:pointer">
+    <img id="viewerImg" alt="" style="max-width:92vw;max-height:92vh;object-fit:contain;
+        filter:drop-shadow(0 0 24px #000)">
+</div>
+
 <script>
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
@@ -140,7 +147,26 @@ function showPopup(ev) {
     popupTimer = setTimeout(() => { el.style.display = "none"; }, ev.ms ?? 3000);
 }
 
+// Picture viewer. While it's open the game gets no input, so you can't walk
+// away under it; the key that closes it is swallowed until released, so the
+// same Space doesn't reach the server and re-open the painting.
+const viewer = {
+    el: document.getElementById("viewer"),
+    img: document.getElementById("viewerImg"),
+    get open() { return this.el.style.display !== "none"; },
+    show(ev) {
+        this.img.src = ev.src;
+        this.el.style.display = "flex";
+    },
+    close() {
+        this.el.style.display = "none";
+        this.img.removeAttribute("src");
+    },
+};
+viewer.el.addEventListener("click", () => viewer.close());
+
 const HANDLERS = {
+    picture: ev => viewer.show(ev),
     music: ev => audio.setMusic(ev),
     sound: ev => audio.playSound(ev),
     tone:  ev => audio.tone(ev),
@@ -168,12 +194,24 @@ function startGame() {
     const ws = new WebSocket(wsUrl);
     ws.binaryType = "blob";
 
+    const swallowed = new Set(); // keys that closed the viewer, until released
+
     window.addEventListener("keydown", (e) => {
         audio.unlock(); // browsers allow audio only after a user gesture
+        if (viewer.open) {
+            if (e.key === " " || e.key === "Escape" || e.key === "Enter") {
+                e.preventDefault();
+                viewer.close();
+                swallowed.add(e.key);
+            }
+            return;
+        }
+        if (swallowed.has(e.key)) return; // key repeat of the closing press
         inputState[e.key] = true;
     });
 
     window.addEventListener("keyup", (e) => {
+        swallowed.delete(e.key);
         inputState[e.key] = false;
     });
 
@@ -188,7 +226,8 @@ function startGame() {
 
     setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ keys: inputState, mdx: mouseDX }));
+            // the viewer freezes the player: no keys, no mouse look
+            ws.send(JSON.stringify({ keys: viewer.open ? {} : inputState, mdx: viewer.open ? 0 : mouseDX }));
             mouseDX = 0;
         }
     }, 50);

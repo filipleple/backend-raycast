@@ -86,6 +86,8 @@ type Engine struct {
 	defs      map[string]Def
 	musicDefs map[string]MusicDef
 	scripts   *scriptHost
+
+	pictureViews map[string][]byte // PictureViewPNG cache, cleared on reload
 }
 
 // NewEngine loads all content under root (the directory holding
@@ -103,6 +105,8 @@ func NewEngine(root string) (*Engine, error) {
 		musicDefs: c.musicDefs,
 		world:     &World{Maps: []*Map{c.baseMap}},
 		renderer:  newRenderer(c.sprite),
+
+		pictureViews: map[string][]byte{},
 	}
 	e.scripts = newScriptHost(filepath.Join(root, "scripts"))
 	return e, nil

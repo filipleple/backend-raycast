@@ -48,6 +48,13 @@ func (e *Engine) step(p *Player, inputs map[string]bool, turnDelta float64) {
 			}
 		}
 
+		// a picture straight ahead opens full-screen in the browser
+		if connDoor == nil {
+			if pic := lookedAtPicture(m, p.X, p.Y, dirX, dirY); pic != nil {
+				p.emit(Event{"type": "picture", "src": pictureViewURL(pic)})
+			}
+		}
+
 		e.scripts.fireUse(e, p, dirX, dirY)
 
 		lookCol := int((p.X + dirX*m.TileSize*0.7) / m.TileSize)

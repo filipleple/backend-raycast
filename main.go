@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"raycast/game"
@@ -79,6 +80,24 @@ func main() {
 	//game routes
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
 	http.Handle("/ost/", http.StripPrefix("/ost/", http.FileServer(http.Dir(filepath.Join(contentDir, "ost")))))
+
+	// full-screen picture viewer: /picture/<picture>/<frame>.png
+	http.HandleFunc("/picture/", func(w http.ResponseWriter, r *http.Request) {
+		picture, frame, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/picture/"), "/")
+		frame, isPNG := strings.CutSuffix(frame, ".png")
+		if !ok || !isPNG {
+			http.NotFound(w, r)
+			return
+		}
+		data, err := engine.PictureViewPNG(picture, frame)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.Header().Set("Cache-Control", "no-cache") // content reloads may replace it
+		w.Write(data)
+	})
 
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleWS(w, r, db, engine)
