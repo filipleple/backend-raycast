@@ -165,21 +165,38 @@ func ensureTexture(root string, m *Map, name, preferred string, keepAlpha bool) 
 	}
 }
 
+// ensurePictureTexture composes a picture cell's picture and frame into the
+// single texture its pane is drawn with (see picture.go).
+func ensurePictureTexture(root string, m *Map, sym Symbol) {
+	key := sym.wallTextureKey()
+	if _, ok := m.Textures[key]; ok {
+		return
+	}
+	dir := filepath.Join(root, "textures")
+	var pic, frame *Texture
+	if sym.TextureName != "" {
+		pic = loadTextureFile(dir, sym.TextureName, "pictures", false)
+	}
+	if sym.FrameTexture != "" {
+		// keep alpha: the frame's window and outer silhouette are transparent
+		frame = loadTextureFile(dir, sym.FrameTexture, "frames", true)
+	}
+	if t := composePicture(pic, frame); t != nil {
+		m.Textures[key] = t
+	}
+}
+
 // ensureSymbolTextures loads every texture sym references.
 func ensureSymbolTextures(root string, m *Map, sym Symbol) {
-	if sym.Wall && sym.TextureName != "" {
+	switch {
+	case sym.Wall && sym.Picture:
+		ensurePictureTexture(root, m, sym)
+	case sym.Wall && sym.TextureName != "":
 		preferred := "walls"
 		if sym.Door {
 			preferred = "door"
 		}
-		if sym.Picture {
-			preferred = "pictures"
-		}
 		ensureTexture(root, m, sym.TextureName, preferred, sym.Transparency)
-	}
-	if sym.Picture && sym.FrameTexture != "" {
-		// keep alpha: the frame's transparent center lets the picture show through
-		ensureTexture(root, m, sym.FrameTexture, "frames", true)
 	}
 	ensureTexture(root, m, sym.FloorTexture, "floors+ceilings", false)
 	ensureTexture(root, m, sym.CeilingTexture, "floors+ceilings", false)

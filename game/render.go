@@ -148,7 +148,7 @@ func (r *renderer) renderPanes(img *image.NRGBA, hits [][]rayHit, m *Map) {
 			}
 
 			cell := &m.Grid[hit.CY][hit.CX]
-			tex := m.Textures[cell.TextureName]
+			tex := m.Textures[cell.wallTextureKey()]
 			if tex == nil {
 				drawRectOutline(img, paneX, y, paneX+pw, y+ph, paneColor)
 				continue
@@ -156,16 +156,6 @@ func (r *renderer) renderPanes(img *image.NRGBA, hits [][]rayHit, m *Map) {
 
 			texX := int(hit.U*float64(tex.W)) % tex.W
 			r.drawTextureStrip(img, tex, texX, paneX, y, pw, ph, cell.Transparency)
-
-			// a picture cell blits a golden frame overlay on top of the base
-			// image; the frame's transparent center lets the picture show
-			// through. Missing frame texture -> just the bare picture.
-			if cell.Picture {
-				if ftex := m.Textures[cell.FrameTexture]; ftex != nil {
-					frameX := int(hit.U*float64(ftex.W)) % ftex.W
-					r.drawTextureStrip(img, ftex, frameX, paneX, y, pw, ph, true)
-				}
-			}
 		}
 	}
 }
