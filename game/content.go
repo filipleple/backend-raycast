@@ -1,6 +1,11 @@
+//go:build !js
+
 package game
 
-import "path/filepath"
+import (
+	"os"
+	"path/filepath"
+)
 
 // Content is a fully loaded, validated bundle of game content: tile
 // definitions, music definitions, the base map (grid, zones, textures) and the
@@ -15,6 +20,9 @@ type Content struct {
 	musicDefs map[string]MusicDef
 	baseMap   *Map
 	sprite    *Texture
+
+	files   []string // what browser engines may fetch (see contentserve.go)
+	version string   // changes whenever any of files changes
 }
 
 // LoadContent reads and validates every content input under root:
@@ -36,7 +44,11 @@ func LoadContent(root string) (*Content, error) {
 	if err != nil {
 		return nil, err
 	}
-	spriteImg, err := loadImageFile(filepath.Join(root, "hatman.gif"))
+	spriteImg, err := loadImageFile(os.DirFS(root), spriteFile)
+	if err != nil {
+		return nil, err
+	}
+	files, version, err := contentManifest(root)
 	if err != nil {
 		return nil, err
 	}
@@ -45,6 +57,8 @@ func LoadContent(root string) (*Content, error) {
 		musicDefs: musicDefs,
 		baseMap:   baseMap,
 		sprite:    textureFromImage(spriteImg, true),
+		files:     files,
+		version:   version,
 	}, nil
 }
 
@@ -72,6 +86,7 @@ func (e *Engine) ReloadContent() error {
 	e.renderer = newRenderer(c.sprite)
 	e.scripts.reload()
 	e.pictureViews = map[string][]byte{}
+	e.contentFiles, e.contentVersion = c.files, c.version
 
 	// Every live player caches a *Map pointer and an absolute pixel position
 	// that a new grid can invalidate — a formerly walkable cell may now be a

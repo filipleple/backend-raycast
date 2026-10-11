@@ -4,6 +4,9 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 RUN go build -o server .
+# the browser-side engine (game/client.go) + Go's wasm loader for game.html
+RUN GOOS=js GOARCH=wasm go build -ldflags=-s -o static/engine.wasm ./cmd/client \
+ && cp "$(go env GOROOT)/lib/wasm/wasm_exec.js" static/
 
 FROM alpine:latest
 # git: the content directory is a git repo the admin panel commits to on each
@@ -11,7 +14,7 @@ FROM alpine:latest
 RUN apk add --no-cache git
 WORKDIR /app
 COPY --from=builder /app/server .
-COPY static/ ./static/
+COPY --from=builder /app/static/ ./static/
 # The admin panel (templates/admin.html) is embedded into the binary via
 # go:embed. Game content is NOT baked in — it lives in a git-versioned
 # directory bind-mounted at /app/content (CONTENT_DIR) and hot-reloaded at

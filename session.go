@@ -20,6 +20,12 @@ type Session struct {
 	input   map[string]bool
 	mouseDX float64 // accumulated mouse yaw (screen px) since last tick
 
+	// clientEngine sessions render in the browser (game/client.go): they
+	// report predicted poses instead of keys and get state, not JPEGs.
+	clientEngine bool
+	move         *game.ClientMsg // latest reported pose since last tick
+	use          bool            // Space pressed since last tick
+
 	done     chan struct{}
 	userID   int
 	username string
@@ -42,6 +48,13 @@ func (s *Session) tickLoop() {
 		case <-s.done:
 			return
 		case <-ticker.C:
+		}
+
+		if s.clientEngine {
+			if !s.clientTick() {
+				return
+			}
+			continue
 		}
 
 		// snapshot input; drain the accumulated mouse delta so each tick
@@ -77,6 +90,24 @@ func (s *Session) tickLoop() {
 	}
 }
 
+// clientTick is one tick of a browser-engine session: hand the engine what
+// arrived since last tick and send back the state message.
+func (s *Session) clientTick() bool {
+	s.mu.Lock()
+	in := game.ClientInput{Move: s.move, Use: s.use}
+	s.move, s.use = nil, false
+	s.mu.Unlock()
+
+	msg, err := s.engine.ClientTick(s.player, in)
+	if err != nil {
+		return false
+	}
+	s.wsConn.SetWriteDeadline(time.Now().Add(500 * time.Millisecond))
+	err = s.wsConn.WriteMessage(websocket.TextMessage, msg)
+	s.wsConn.SetWriteDeadline(time.Time{})
+	return err == nil
+}
+
 func (s *Session) Start() {
 	log.Println("starting a player session")
 	go s.readWS()
@@ -90,6 +121,22 @@ func (s *Session) readWS() {
 		_, msg, err := s.wsConn.ReadMessage()
 		if err != nil {
 			return
+		}
+
+		if s.clientEngine {
+			var cm game.ClientMsg
+			if err := json.Unmarshal(msg, &cm); err != nil {
+				continue
+			}
+			s.mu.Lock()
+			switch cm.T {
+			case "move":
+				s.move = &cm
+			case "use":
+				s.use = true
+			}
+			s.mu.Unlock()
+			continue
 		}
 
 		var incoming struct {

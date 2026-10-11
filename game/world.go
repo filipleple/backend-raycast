@@ -1,77 +1,18 @@
+//go:build !js
+
 package game
 
 import (
 	"bytes"
 	"encoding/json"
 	"image"
+	"image/jpeg"
 	"os"
 	"path/filepath"
 	"sync"
 )
 
-// Screen and world constants. World scale is fixed, independent of screen and
-// map size. Movement is in world pixels; speed + margin must stay below
-// TileSize or the per-axis collision check can skip over a one-tile wall.
-const (
-	ScreenW = 320
-	ScreenH = 240
-
-	FOVDegrees = 60
-	NumRays    = 120
-
-	TileSize     = 64.0
-	PlayerSpeed  = TileSize * 0.25 // world px per tick
-	TurnSpeed    = 0.14            // radians per tick for arrow-key turning
-	PlayerMargin = TileSize * 0.2  // collision radius in world px
-
-	// MouseSensitivity converts accumulated mouse movementX (screen px) into
-	// radians of yaw per tick. Tune to taste.
-	MouseSensitivity = 0.003
-
-	jpegQuality = 60
-)
-
-type Monster struct {
-	X, Y float64
-}
-
-// Map is a self-contained room.
-type Map struct {
-	Cols, Rows  int
-	TileSize    float64
-	Grid        [][]Symbol
-	Textures    map[string]*Texture
-	Monsters    []Monster
-	DoorCells   map[[2]int]*Door
-	PortalDoors map[[2]int]*PortalDoor
-	MusicZones  [][]string // parallel MUSIC.csv grid; nil = no zone music
-}
-
-type World struct {
-	Maps []*Map
-}
-
-type Player struct {
-	ID         int
-	Name       string
-	Avatar     *Texture // nil falls back to hatman
-	CurrentMap *Map
-	X, Y       float64
-	Angle      float64
-	ShowMap    bool
-	prevInputs map[string]bool
-
-	events []Event // outgoing control messages, drained each tick
-
-	// music-zone state machine
-	musicZone    string
-	musicLocked  bool // a script pinned the track; ignore zones
-	pendingZone  string
-	pendingTicks int
-
-	// last cell, for onEnter edge detection
-	prevCol, prevRow int
-}
+const jpegQuality = 60
 
 // Engine owns the shared world and all connected players. Input steps mutate
 // state under the write lock; rendering only reads and runs under the read
@@ -88,6 +29,9 @@ type Engine struct {
 	scripts   *scriptHost
 
 	pictureViews map[string][]byte // PictureViewPNG cache, cleared on reload
+
+	contentFiles   []string // fetchable by browser engines, see contentserve.go
+	contentVersion string
 }
 
 // NewEngine loads all content under root (the directory holding
@@ -107,6 +51,9 @@ func NewEngine(root string) (*Engine, error) {
 		renderer:  newRenderer(c.sprite),
 
 		pictureViews: map[string][]byte{},
+
+		contentFiles:   c.files,
+		contentVersion: c.version,
 	}
 	e.scripts = newScriptHost(filepath.Join(root, "scripts"))
 	return e, nil
@@ -130,6 +77,7 @@ func buildMap(root string, defs map[string]Def) (*Map, error) {
 	if err != nil {
 		return nil, err
 	}
+	fsys := os.DirFS(root)
 	m := &Map{
 		Cols: cols, Rows: rows,
 		TileSize:    TileSize,
@@ -146,7 +94,7 @@ func buildMap(root string, defs map[string]Def) (*Map, error) {
 
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
-			ensureSymbolTextures(root, m, grid[r][c])
+			ensureSymbolTextures(fsys, m, grid[r][c])
 		}
 	}
 	return m, nil
@@ -155,56 +103,6 @@ func buildMap(root string, defs map[string]Def) (*Map, error) {
 // buildMap rebuilds a fresh base map from the engine's current defs — used to
 // lazily materialize portal target rooms at runtime.
 func (e *Engine) buildMap() (*Map, error) { return buildMap(e.root, e.defs) }
-
-// ensureTexture loads name into m.Textures if not already present.
-func ensureTexture(root string, m *Map, name, preferred string, keepAlpha bool) {
-	if name == "" {
-		return
-	}
-	if _, ok := m.Textures[name]; ok {
-		return
-	}
-	if t := loadTextureFile(filepath.Join(root, "textures"), name, preferred, keepAlpha); t != nil {
-		m.Textures[name] = t
-	}
-}
-
-// ensurePictureTexture composes a picture cell's picture and frame into the
-// single texture its pane is drawn with (see picture.go).
-func ensurePictureTexture(root string, m *Map, sym Symbol) {
-	key := sym.wallTextureKey()
-	if _, ok := m.Textures[key]; ok {
-		return
-	}
-	dir := filepath.Join(root, "textures")
-	var pic, frame *Texture
-	if sym.TextureName != "" {
-		pic = loadTextureFile(dir, sym.TextureName, "pictures", false)
-	}
-	if sym.FrameTexture != "" {
-		// keep alpha: the frame's window and outer silhouette are transparent
-		frame = loadTextureFile(dir, sym.FrameTexture, "frames", true)
-	}
-	if t := composePicture(pic, frame); t != nil {
-		m.Textures[key] = t
-	}
-}
-
-// ensureSymbolTextures loads every texture sym references.
-func ensureSymbolTextures(root string, m *Map, sym Symbol) {
-	switch {
-	case sym.Wall && sym.Picture:
-		ensurePictureTexture(root, m, sym)
-	case sym.Wall && sym.TextureName != "":
-		preferred := "walls"
-		if sym.Door {
-			preferred = "door"
-		}
-		ensureTexture(root, m, sym.TextureName, preferred, sym.Transparency)
-	}
-	ensureTexture(root, m, sym.FloorTexture, "floors+ceilings", false)
-	ensureTexture(root, m, sym.CeilingTexture, "floors+ceilings", false)
-}
 
 // setCellLayer rewrites one layer of a cell through the definitions table,
 // exactly like the map loader would, and keeps DoorCells coherent. The change
@@ -226,7 +124,7 @@ func (e *Engine) setCellLayer(m *Map, col, row, layer int, id string) {
 	}
 	sym := makeSymbol(e.defs, c, w, f)
 	m.Grid[row][col] = sym
-	ensureSymbolTextures(e.root, m, sym)
+	ensureSymbolTextures(os.DirFS(e.root), m, sym)
 
 	pos := [2]int{col, row}
 	delete(m.DoorCells, pos)
@@ -241,9 +139,11 @@ func (e *Engine) setCellLayer(m *Map, col, row, layer int, id string) {
 // image data; both fall back to the hatman sprite.
 func (e *Engine) Join(id int, name string, avatarBytes []byte) *Player {
 	var avatar *Texture
+	var avatarRaw []byte
 	if len(avatarBytes) > 0 {
 		if img, _, err := image.Decode(bytes.NewReader(avatarBytes)); err == nil {
 			avatar = textureFromImage(img, true)
+			avatarRaw = avatarBytes
 		}
 	}
 
@@ -253,6 +153,7 @@ func (e *Engine) Join(id int, name string, avatarBytes []byte) *Player {
 		ID:         id,
 		Name:       name,
 		Avatar:     avatar,
+		avatarRaw:  avatarRaw,
 		CurrentMap: e.world.Maps[0],
 		prevInputs: map[string]bool{},
 	}
@@ -310,4 +211,12 @@ func (e *Engine) Tick(p *Player, keys map[string]bool, turnDelta float64) (frame
 	}
 	frame, err = encodeJPEG(e.RenderFrame(p))
 	return frame, events, err
+}
+
+func encodeJPEG(img image.Image) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }

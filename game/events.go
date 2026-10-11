@@ -1,10 +1,6 @@
-package game
+//go:build !js
 
-// Event is one JSON control message for the browser (music change, popup,
-// sound, ...). Events ride the WebSocket as text frames; binary frames stay
-// JPEG video. The client dispatches on the "type" key and ignores types it
-// doesn't know, so scripts can invent new ones freely.
-type Event map[string]any
+package game
 
 // emit queues ev for delivery on p's next tick. Caller must hold the write
 // lock (any player's handler may emit to any other player).

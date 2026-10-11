@@ -17,7 +17,12 @@
         filter:drop-shadow(0 0 24px #000)">
 </div>
 
+<script src="/wasm_exec.js"></script>
 <script>
+// Browser-side engine: the page owns networking, timing and input; the Go
+// engine compiled to WebAssembly (cmd/client → engine.wasm, global `raycast`)
+// owns the map, movement prediction and rendering. The server validates moves
+// and runs doors, scripts and music. Legacy JPEG streaming: /game-jpeg.html.
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
 
@@ -33,8 +38,24 @@ fetch("/me").then(res => {
         canvas.onclick = () => window.location.href = "/";
         return;
     }
-    startGame();
+    loadEngine().then(startGame).catch(e => {
+        console.error(e);
+        ctx.fillStyle = "white";
+        ctx.font = "16px monospace";
+        ctx.textAlign = "center";
+        ctx.fillText("engine failed to load", canvas.width / 2, canvas.height / 2);
+    });
 });
+
+function loadEngine() {
+    return new Promise((resolve, reject) => {
+        const go = new Go();
+        window.onRaycastReady = resolve;
+        WebAssembly.instantiateStreaming(fetch("/engine.wasm"), go.importObject)
+            .then(r => go.run(r.instance))
+            .catch(reject);
+    });
+}
 
 // ---------------------------------------------------------------------------
 // AudioEngine — all playback happens here in the browser; the server only
@@ -177,25 +198,61 @@ const HANDLERS = {
     eval:  ev => new Function(ev.js)(),
 };
 
-function handleEvents(json) {
-    let events;
-    try { events = JSON.parse(json); } catch (e) { console.error("bad event frame:", e); return; }
+function handleEvents(events) {
     for (const ev of events) {
         try { HANDLERS[ev.type]?.(ev); }
         catch (e) { console.error(`event ${ev.type} handler failed:`, e); }
     }
 }
 
+const SIM_MS = 100;            // movement ticks, same as the server's
+const MOUSE_SENS = 0.003;      // radians per screen px (MouseSensitivity in game/types.go)
+const SIM_KEYS = ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "a", "d"];
+
 function startGame() {
     const inputState = {};
-    let mouseDX = 0; // mouse yaw accumulated since the last WS send
-    const proto = location.protocol === "https:" ? "wss" : "ws";
-    const wsUrl = `${proto}://${location.host}${location.pathname.replace(/\/[^/]*$/, "/ws")}`;
-    const ws = new WebSocket(wsUrl);
-    ws.binaryType = "blob";
-
     const swallowed = new Set(); // keys that closed the viewer, until released
+    const proto = location.protocol === "https:" ? "wss" : "ws";
+    const wsUrl = `${proto}://${location.host}${location.pathname.replace(/\/[^/]*$/, "/ws")}?engine=client`;
+    const ws = new WebSocket(wsUrl);
 
+    // predicted pose: the sim steps prev -> cur every SIM_MS, frames
+    // interpolate between them; mouse yaw applies to both immediately
+    let prev = null, cur = null, simClock = 0;
+    let epoch = 0, showMap = false;
+    const others = new Map(); // id -> {px, py, x, y, t}
+    const avatarsAsked = new Set();
+    const frame = ctx.createImageData(canvas.width, canvas.height);
+
+    function send(msg) { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(msg)); }
+    function sendMove() {
+        if (cur) send({ t: "move", x: cur.x, y: cur.y, a: cur.a, m: showMap, e: epoch });
+    }
+
+    // --- downloads: whatever the engine says it's missing --------------------
+    const inflight = new Set();
+    function pumpDownloads() {
+        const version = raycast.version();
+        for (const path of raycast.wanted()) {
+            if (inflight.has(path)) continue;
+            inflight.add(path);
+            const url = "/content/" + path.split("/").map(encodeURIComponent).join("/") + "?v=" + version;
+            fetch(url)
+                .then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.arrayBuffer(); })
+                .then(buf => raycast.addFile(path, new Uint8Array(buf)))
+                .catch(e => console.error("texture download failed:", e))
+                .finally(() => inflight.delete(path));
+        }
+    }
+    function fetchAvatar(id) {
+        avatarsAsked.add(id);
+        fetch(`/avatar/player/${id}`)
+            .then(r => r.ok ? r.arrayBuffer() : null)
+            .then(buf => { if (buf) raycast.setAvatar(id, new Uint8Array(buf)); })
+            .catch(() => {});
+    }
+
+    // --- input ----------------------------------------------------------------
     window.addEventListener("keydown", (e) => {
         audio.unlock(); // browsers allow audio only after a user gesture
         if (viewer.open) {
@@ -207,9 +264,13 @@ function startGame() {
             return;
         }
         if (swallowed.has(e.key)) return; // key repeat of the closing press
+        if (!e.repeat && e.key === "m") showMap = !showMap;
+        if (!e.repeat && e.key === " ") {
+            sendMove(); // the server resolves Space from our latest pose
+            send({ t: "use" });
+        }
         inputState[e.key] = true;
     });
-
     window.addEventListener("keyup", (e) => {
         swallowed.delete(e.key);
         inputState[e.key] = false;
@@ -221,28 +282,70 @@ function startGame() {
         if (document.pointerLockElement !== canvas) canvas.requestPointerLock();
     });
     document.addEventListener("mousemove", (e) => {
-        if (document.pointerLockElement === canvas) mouseDX += e.movementX;
+        if (document.pointerLockElement !== canvas || viewer.open || !cur) return;
+        const da = e.movementX * MOUSE_SENS;
+        cur.a += da;
+        prev.a += da;
     });
 
-    setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            // the viewer freezes the player: no keys, no mouse look
-            ws.send(JSON.stringify({ keys: viewer.open ? {} : inputState, mdx: viewer.open ? 0 : mouseDX }));
-            mouseDX = 0;
-        }
-    }, 50);
+    setInterval(sendMove, 50);
 
-    ws.onmessage = async (event) => {
-        if (typeof event.data === "string") { // text frame = JSON control events
-            handleEvents(event.data);
-            return;
+    // --- server state ---------------------------------------------------------
+    ws.onmessage = (event) => {
+        let msg;
+        try { msg = JSON.parse(event.data); } catch (e) { console.error("bad state frame:", e); return; }
+        const err = raycast.apply(event.data); // content, map, cells
+        if (err) console.error("engine apply:", err);
+        if (msg.pose) {
+            cur = { x: msg.pose.x, y: msg.pose.y, a: msg.pose.a };
+            prev = { ...cur };
+            epoch = msg.pose.e;
+            showMap = msg.pose.m;
+            simClock = performance.now();
         }
-        const bitmap = await createImageBitmap(event.data);
-        ctx.drawImage(bitmap, 0, 0);
-        bitmap.close();
+        const now = performance.now(), seen = new Set();
+        for (const p of msg.players) {
+            seen.add(p.id);
+            const o = others.get(p.id);
+            if (o) { o.px = o.x; o.py = o.y; o.x = p.x; o.y = p.y; o.t = now; }
+            else others.set(p.id, { px: p.x, py: p.y, x: p.x, y: p.y, t: now });
+            if (p.av && !avatarsAsked.has(p.id)) fetchAvatar(p.id);
+        }
+        for (const id of others.keys()) if (!seen.has(id)) others.delete(id);
+        if (msg.ev) handleEvents(msg.ev);
+        pumpDownloads();
     };
 
+    // --- frame loop -----------------------------------------------------------
+    function loop(now) {
+        requestAnimationFrame(loop);
+        if (!cur) return;
+        if (now - simClock > 5 * SIM_MS) simClock = now - SIM_MS; // tab slept: don't fast-forward
+        const keys = viewer.open ? {} : inputState; // the viewer freezes the player
+        while (now - simClock >= SIM_MS) {
+            prev = cur;
+            const [x, y, a] = raycast.step(cur.x, cur.y, cur.a, keys);
+            cur = { x, y, a };
+            simClock += SIM_MS;
+        }
+        const f = (now - simClock) / SIM_MS;
+        const lerp = (a, b, t) => a + (b - a) * t;
+
+        const flat = new Float64Array(others.size * 3);
+        let i = 0;
+        for (const [id, o] of others) {
+            const t = Math.min(1, (now - o.t) / SIM_MS);
+            flat[i++] = id; flat[i++] = lerp(o.px, o.x, t); flat[i++] = lerp(o.py, o.y, t);
+        }
+        if (raycast.render(lerp(prev.x, cur.x, f), lerp(prev.y, cur.y, f), lerp(prev.a, cur.a, f), showMap, flat, frame.data)) {
+            ctx.putImageData(frame, 0, 0);
+        }
+        pumpDownloads();
+    }
+    requestAnimationFrame(loop);
+
     ws.onclose = () => {
+        cur = null;
         ctx.fillStyle = "black";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.fillStyle = "white";

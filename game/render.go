@@ -1,9 +1,7 @@
 package game
 
 import (
-	"bytes"
 	"image"
-	"image/jpeg"
 	"math"
 	"sort"
 )
@@ -27,10 +25,17 @@ func newRenderer(hatman *Texture) *renderer {
 // render draws p's view: floor/ceiling, wall panes, sprites, then the
 // minimap overlay if toggled.
 func (r *renderer) render(p *Player, others []*Player) *image.NRGBA {
-	m := p.CurrentMap
 	img := image.NewNRGBA(image.Rect(0, 0, r.width, r.height))
-	for i := 3; i < len(img.Pix); i += 4 {
-		img.Pix[i] = 0xff // opaque black canvas
+	r.renderInto(img, p, others)
+	return img
+}
+
+// renderInto is render onto an existing width×height image, so the browser
+// engine can reuse one buffer every frame.
+func (r *renderer) renderInto(img *image.NRGBA, p *Player, others []*Player) {
+	m := p.CurrentMap
+	for i := 0; i < len(img.Pix); i += 4 {
+		img.Pix[i], img.Pix[i+1], img.Pix[i+2], img.Pix[i+3] = 0, 0, 0, 0xff // opaque black canvas
 	}
 
 	r.renderFloorCeiling(img, p, m)
@@ -53,15 +58,6 @@ func (r *renderer) render(p *Player, others []*Player) *image.NRGBA {
 	if p.ShowMap {
 		r.drawWallMap(img, m, p)
 	}
-	return img
-}
-
-func encodeJPEG(img image.Image) ([]byte, error) {
-	var buf bytes.Buffer
-	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: jpegQuality}); err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
 }
 
 // renderFloorCeiling casts a floor/ceiling ray per screen pixel: each row
@@ -226,7 +222,7 @@ func (r *renderer) renderSprites(img *image.NRGBA, p *Player, m *Map, distances 
 	sort.SliceStable(sprites, func(a, b int) bool { return sprites[a].dist > sprites[b].dist })
 
 	for _, s := range sprites {
-		if s.dist < 0.1 {
+		if s.dist < 0.1 || s.tex == nil { // nil: sprite not downloaded yet
 			continue
 		}
 		spriteAngle := math.Atan2(s.y-p.Y, s.x-p.X) - p.Angle

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -81,6 +82,19 @@ func main() {
 	http.Handle("/", http.FileServer(http.Dir("./static/")))
 	http.Handle("/ost/", http.StripPrefix("/ost/", http.FileServer(http.Dir(filepath.Join(contentDir, "ost")))))
 
+	// textures for browser-side engines, and other players' avatars
+	http.Handle("/content/", engine.ContentHandler("/content/"))
+	http.HandleFunc("/avatar/player/", func(w http.ResponseWriter, r *http.Request) {
+		id, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/avatar/player/"))
+		data := engine.PlayerAvatar(id)
+		if err != nil || data == nil {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", http.DetectContentType(data))
+		w.Write(data)
+	})
+
 	// full-screen picture viewer: /picture/<picture>/<frame>.png
 	http.HandleFunc("/picture/", func(w http.ResponseWriter, r *http.Request) {
 		picture, frame, ok := strings.Cut(strings.TrimPrefix(r.URL.Path, "/picture/"), "/")
@@ -141,13 +155,16 @@ func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB, engine *game.E
 	player := engine.Join(user.ID, user.Username, avatarBytes)
 
 	session := &Session{
-		wsConn:   ws,
-		engine:   engine,
-		player:   player,
-		input:    make(map[string]bool),
-		done:     make(chan struct{}),
-		userID:   user.ID,
-		username: user.Username,
+		// ?engine=client: the browser renders (static/game.html); without it
+		// the server streams JPEG frames (static/game-jpeg.html)
+		clientEngine: r.URL.Query().Get("engine") == "client",
+		wsConn:       ws,
+		engine:       engine,
+		player:       player,
+		input:        make(map[string]bool),
+		done:         make(chan struct{}),
+		userID:       user.ID,
+		username:     user.Username,
 	}
 
 	activeSessionsMu.Lock()

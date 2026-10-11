@@ -2,3 +2,6 @@ __pycache__/
 raycaster
 .env
 Caddyfile
+# build outputs of run.sh / Dockerfile.backend
+static/engine.wasm
+static/wasm_exec.js
