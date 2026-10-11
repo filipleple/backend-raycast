@@ -29,8 +29,6 @@
 
     .panel h3 { margin: 0 0 12px 0; font-size: 1em; text-transform: uppercase; letter-spacing: 1px; }
 
-    input[type="text"],
-    input[type="password"],
     input[type="file"] {
       width: 100%;
       box-sizing: border-box;
@@ -58,15 +56,6 @@
     button.danger  { background: #660000; border-color: #ff8888; }
     button.success { background: #005500; border-color: #88ff88; }
 
-    .toggle-link {
-      color: #aaaaff;
-      cursor: pointer;
-      font-size: 0.85em;
-      text-decoration: underline;
-      display: inline-block;
-      margin-top: 10px;
-    }
-
     .msg { font-size: 0.85em; margin-top: 8px; min-height: 1.2em; }
     .msg.err { color: #ff8888; }
     .msg.ok  { color: #88ff88; }
@@ -86,7 +75,6 @@
     .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 
     #guest-panel, #user-panel { display: none; }
-    #register-form { display: none; }
   </style>
 </head>
 <body>
@@ -95,30 +83,16 @@
   <h2>multiplayer raycasting game</h2>
   <hr>
 
-  <!-- logged out -->
+  <!-- not logged in on 629fm -->
   <div id="guest-panel">
     <div class="panel">
-
-      <!-- login -->
-      <div id="login-form">
-        <h3>login</h3>
-        <input id="login-user" type="text" placeholder="username">
-        <input id="login-pass" type="password" placeholder="password">
-        <button onclick="login()">log in</button>
-        <div id="login-msg" class="msg"></div>
-        <span class="toggle-link" onclick="showForm('register')">no account? register</span>
+      <h3>log in first</h3>
+      <div id="guest-msg" class="msg err"></div>
+      <p>the game uses your 629fm account. log in on 629fm (in chat: <code>/login</code>), then come back.</p>
+      <div class="actions">
+        <a href="/"><button>&#x25C4; 629fm</button></a>
+        <button onclick="window.location.reload()">retry</button>
       </div>
-
-      <!-- register -->
-      <div id="register-form">
-        <h3>register</h3>
-        <input id="reg-user" type="text" placeholder="username">
-        <input id="reg-pass" type="password" placeholder="password">
-        <button onclick="register()">register</button>
-        <div id="reg-msg" class="msg"></div>
-        <span class="toggle-link" onclick="showForm('login')">already have an account? log in</span>
-      </div>
-
     </div>
   </div>
 
@@ -128,7 +102,7 @@
       <h3>welcome, <span id="uname"></span></h3>
       <hr>
 
-      <img id="avatar-img" src="/avatar" onerror="this.style.display='none'; document.getElementById('no-avatar').style.display='block'">
+      <img id="avatar-img" alt="" onerror="this.style.display='none'; document.getElementById('no-avatar').style.display='block'">
       <div id="no-avatar" style="display:none">no avatar set</div>
 
       <h3>upload avatar</h3>
@@ -139,84 +113,25 @@
       <hr>
 
       <div class="actions">
-        <a href="/game.html"><button class="success">&#x25BA; join game</button></a>
-        <button class="danger" onclick="logout()">log out</button>
+        <a href="game.html"><button class="success">&#x25BA; join game</button></a>
+        <a id="admin-link" href="admin" style="display:none"><button>admin</button></a>
       </div>
-      <div id="logout-msg" class="msg"></div>
     </div>
   </div>
 
+<script src="session.js"></script>
 <script>
-  function showForm(which) {
-    document.getElementById("login-form").style.display    = which === "login"    ? "block" : "none";
-    document.getElementById("register-form").style.display = which === "register" ? "block" : "none";
-    document.getElementById("login-msg").textContent = "";
-    document.getElementById("reg-msg").textContent   = "";
-  }
-
   async function init() {
-    const res = await fetch("/me");
-    if (!res.ok) {
-      showForm("login");
+    const { user, error } = await startSession();
+    if (!user) {
+      document.getElementById("guest-msg").textContent = error;
       document.getElementById("guest-panel").style.display = "block";
       return;
     }
-    const data = await res.json();
-    const username = data.message.replace("you are logged in as: ", "");
-    document.getElementById("uname").textContent = username;
+    document.getElementById("uname").textContent = user.username;
+    document.getElementById("avatar-img").src = "avatar";
+    if (user.is_admin) document.getElementById("admin-link").style.display = "inline";
     document.getElementById("user-panel").style.display = "block";
-  }
-
-  async function login() {
-    const msg = document.getElementById("login-msg");
-    const res = await fetch("/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: document.getElementById("login-user").value,
-        password: document.getElementById("login-pass").value,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      msg.textContent = data.error;
-      msg.className = "msg err";
-      return;
-    }
-    window.location.reload();
-  }
-
-  async function register() {
-    const msg = document.getElementById("reg-msg");
-    const res = await fetch("/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: document.getElementById("reg-user").value,
-        password: document.getElementById("reg-pass").value,
-      }),
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      msg.textContent = data.error;
-      msg.className = "msg err";
-      return;
-    }
-    msg.textContent = data.message + " — you can now log in";
-    msg.className = "msg ok";
-    showForm("login");
-  }
-
-  async function logout() {
-    const msg = document.getElementById("logout-msg");
-    const res = await fetch("/logout", { method: "POST" });
-    if (!res.ok) {
-      const data = await res.json();
-      msg.textContent = data.error;
-      msg.className = "msg err";
-      return;
-    }
-    window.location.reload();
   }
 
   async function uploadAvatar() {
@@ -229,7 +144,7 @@
     }
     const form = new FormData();
     form.append("avatar", file);
-    const res = await fetch("/avatar/upload", { method: "POST", body: form });
+    const res = await fetch("avatar/upload", { method: "POST", body: form });
     const data = await res.json();
     if (!res.ok) {
       msg.textContent = data.error;
@@ -241,7 +156,7 @@
     const img = document.getElementById("avatar-img");
     img.style.display = "block";
     document.getElementById("no-avatar").style.display = "none";
-    img.src = "/avatar?t=" + Date.now();
+    img.src = "avatar?t=" + Date.now();
   }
 
   init();

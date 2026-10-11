@@ -6,7 +6,8 @@ software raycasting renderer, a per-tile music system, an embedded
 JavaScript layer that lets you script the map without a rebuild, and an admin
 panel that syncs content from a Google Sheet and hot-reloads it live. The
 browser is a thin client — it sends key state and paints the JPEG frames the
-server sends back. PostgreSQL stores users and sessions.
+server sends back. Accounts are 629fm's (629Manager); PostgreSQL stores
+per-player game data.
 
 All game content — maps, tile definitions, music, textures, scripts — lives
 under **`content/`**, a git-versioned directory read at runtime and *not* baked
@@ -42,7 +43,7 @@ preserves.
 │  Go server                                                     │
 │                                                                │
 │  main.go  — routing, WS upgrade, session guard, /ost/ static   │
-│  auth.go  — register/login/logout, bcrypt, avatars, sessions   │
+│  auth.go  — 629fm session check (629Manager), avatars          │
 │                                                                │
 │  Session (session.go)                                          │
 │    ├── readWS()   [goroutine] JSON input → shared input map     │
@@ -59,8 +60,8 @@ preserves.
                                 │  postgres (:5432)
                   ┌─────────────┴───────────────┐
                   │  PostgreSQL                  │
-                  │  users     — bcrypt, avatars │
-                  │  sessions  — token → user_id │
+                  │  players — principal→id, avt │
+                  │  content_sources             │
                   └──────────────────────────────┘
 ```
 
@@ -88,9 +89,12 @@ Bare `go run .` (or `./run.sh`) also works for iterating on server code; it
 reads content from `./content` (override with `CONTENT_DIR`) and expects a
 Postgres reachable at `DATABASE_URL`.
 
-To use the admin panel, make yourself an admin — set `ADMIN_USERNAME=you` (it's
-promoted on boot) or run `UPDATE users SET is_admin = true WHERE username='you'`
-— then open `/admin`.
+Accounts are 629fm's, so the game needs the 629fm stack running (it joins its
+`629fm_default` network and calls `manager:8081`) and must be opened through
+629fm's Caddy at `/raycast/` — the browser's 629fm session token is in
+localStorage on that origin. Set `MANAGER_RAYCAST_SERVICE_KEY` to the same
+value in both `.env` files. The admin panel (`/raycast/admin`) is for 629fm
+accounts with the `admin` role.
 
 ### Production
 
@@ -135,15 +139,14 @@ drained onto the wire right before that tick's video frame.
 
 ## Auth API
 
+There's no login here: players log in on 629fm. `static/session.js` reads the
+629Manager token 629fm keeps in localStorage (`629:principalSessionToken`) and
+trades it for the game's cookie. Only `account` principals may play, not guests.
 All endpoints return JSON.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/register` | Create account `{username, password}` |
-| POST | `/login` | Authenticate, set `HttpOnly` `session_token` cookie |
-| POST | `/logout` | Invalidate session, close any active WS |
-| POST | `/unregister` | Delete account (requires password confirmation) |
-| GET | `/me` | Current username if logged in |
+| POST | `/session` | `Authorization: Bearer <629fm token>` → checks it with Manager, sets `HttpOnly` `session_token` cookie, returns `{id, username, is_admin}` |
 | GET | `/avatar` | Current user's avatar image |
 | POST | `/avatar/upload` | Upload a PNG or GIF avatar (5 MB max) |
 
@@ -309,10 +312,12 @@ browser.
   `readWS` on disconnect lets `tickLoop` exit cleanly. `tickLoop` is the sole
   WS writer, so writes need no lock. It also `recover()`s: a script that
   panics the renderer drops that one player, not the server.
-- **Session-cookie auth.** Login issues an `HttpOnly` `session_token` backed
-  by the `sessions` table; `/ws` and every protected endpoint validate it per
-  request. Only one live WS per user (`activeSessions` guard). `/admin/*` adds
-  an `is_admin` check.
+- **629fm accounts.** The `session_token` cookie holds the 629Manager token;
+  `/ws` and every protected endpoint re-resolve it with Manager
+  (`GET /v1/sessions/current`, scoped `raycast` service key), so 629fm logouts
+  and role changes apply at once. A principal gets an int player ID from the
+  `players` table on first sight. Only one live WS per user (`activeSessions`
+  guard). `/admin/*` requires the Manager `admin` role.
 - **Content is data, not image.** `LoadContent` parses and validates a whole
   content directory before anything goes live (a bad CSV fails the load, so the
   running game is untouched); `ReloadContent` swaps it in under the write lock
@@ -334,7 +339,7 @@ browser.
 | Path | Role |
 |---|---|
 | `main.go` | HTTP routing, WS upgrade, session guard, engine + admin startup, `CONTENT_DIR`, `/ost/` static |
-| `auth.go` | Register/login/logout/unregister, avatar upload/fetch, bcrypt, Postgres, `is_admin` |
+| `auth.go` | 629Manager session resolution, `/session`, avatar upload/fetch, Postgres |
 | `admin.go` | `/admin/*` handlers: sheets sync, asset upload, git commit/log/rollback, validation staging |
 | `sheets.go` | Public-link Google Sheets CSV fetch (the single sheet-access seam) |
 | `session.go` | `Session`: `readWS` goroutine, `tickLoop`, text+binary frame writes, panic recovery |
@@ -358,11 +363,11 @@ browser.
 | `content/scripts/` | Hot-reloaded `*.js` game logic (`README.md` = API reference, `blessed.js` = example) |
 | `content/ost/` | Music/sound assets served at `/ost/` |
 | `content/{definitions,TILES,MUSIC,MUSIC_DEFS}.csv`, `textures/`, `hatman.gif` | Tile dictionary, map, music zones/defs, art |
-| `db/schema.sql` | Postgres `users`, `sessions`, `content_sources` tables |
+| `db/schema.sql` | Postgres `players`, `content_sources` tables |
 | `db/migrations/` | Hand-applied SQL for existing databases (schema.sql only runs on a fresh volume) |
 | `static/index.html` | Login / register / avatar management |
 | `static/game.html` | Gameplay canvas: input, WS loop, frame paint, `AudioEngine`, event `HANDLERS` |
 | `Dockerfile.backend` | Go server image (binary + `static/`; content is mounted, not baked) |
-| `docker-compose.yml` | Local: Postgres + go-backend + Caddy; bind-mounts `./content` |
+| `docker-compose.yml` | Postgres + go-backend on 629fm's network (alias `raycast`); bind-mounts `./content` |
 | `docker-compose.prod.yml` | Production overlay: GHCR image, localhost binding, `/srv/raycast-content` mount |
 </content>

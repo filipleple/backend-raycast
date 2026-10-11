@@ -17,22 +17,23 @@
         filter:drop-shadow(0 0 24px #000)">
 </div>
 
+<script src="session.js"></script>
 <script>
 // Legacy client: the server renders and streams JPEG frames. Kept until the
 // browser engine (game.html) has proven itself; see clientside_plan.md.
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
 
-fetch("/me").then(res => {
-    if (!res.ok) {
+startSession().then(({ error }) => {
+    if (error) {
         ctx.fillStyle = "white";
-        ctx.font = "20px monospace";
+        ctx.font = "12px monospace";
         ctx.textAlign = "center";
-        ctx.fillText("not logged in", canvas.width / 2, canvas.height / 2 - 16);
+        ctx.fillText(error, canvas.width / 2, canvas.height / 2 - 16);
         ctx.fillStyle = "#aaaaff";
         ctx.fillText("< back to menu", canvas.width / 2, canvas.height / 2 + 16);
         canvas.style.cursor = "pointer";
-        canvas.onclick = () => window.location.href = "/";
+        canvas.onclick = () => window.location.href = "./";
         return;
     }
     startGame();
@@ -62,7 +63,7 @@ const audio = {
 
     buffer(url) {
         if (!this.buffers[url]) {
-            this.buffers[url] = fetch(url)
+            this.buffers[url] = fetch(gameURL(url))
                 .then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.arrayBuffer(); })
                 .then(b => this.ctx.decodeAudioData(b));
             this.buffers[url].catch(e => { console.error("audio load failed:", e); delete this.buffers[url]; });
@@ -157,7 +158,7 @@ const viewer = {
     img: document.getElementById("viewerImg"),
     get open() { return this.el.style.display !== "none"; },
     show(ev) {
-        this.img.src = ev.src;
+        this.img.src = gameURL(ev.src);
         this.el.style.display = "flex";
     },
     close() {
@@ -254,7 +255,7 @@ function startGame() {
         ctx.fillStyle = "#aaaaff";
         ctx.fillText("< back to menu", canvas.width / 2, canvas.height / 2 + 16);
         canvas.style.cursor = "pointer";
-        canvas.onclick = () => window.location.href = "/";
+        canvas.onclick = () => window.location.href = "./";
     };
 }
 </script>

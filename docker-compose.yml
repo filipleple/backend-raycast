@@ -1,3 +1,11 @@
+# The game runs behind 629fm's Caddy at 629fm.com/raycast/ and uses 629fm
+# accounts (629Manager), so it joins the core 629fm stack's network (like
+# slots does). Bring the 629fm stack up first: it creates that network.
+networks:
+  629fm:
+    name: ${RAYCAST_629FM_NETWORK:-629fm_default}
+    external: true
+
 services:
   db:
     image: postgres:16-alpine
@@ -17,13 +25,17 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.backend
-    ports:
-      - "8080:8080"
+    networks:
+      default:
+      629fm:
+        aliases: [raycast] # the upstream name in 629fm's Caddyfile
     environment:
       DATABASE_URL: "user=${POSTGRES_USER} dbname=${POSTGRES_DB} password=${POSTGRES_PASSWORD} host=db port=5432 sslmode=disable"
       CONTENT_DIR: /app/content
-      # Optional: promote this user to admin on boot (idempotent).
-      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      # 629fm accounts: Manager's private API + this game's scoped key
+      # (MANAGER_RAYCAST_SERVICE_KEY must match the one 629fm's manager has).
+      MANAGER_BASE_URL: ${MANAGER_BASE_URL:-http://manager:8081}
+      MANAGER_RAYCAST_SERVICE_KEY: ${MANAGER_RAYCAST_SERVICE_KEY:?MANAGER_RAYCAST_SERVICE_KEY is required}
     volumes:
       # Game content is a git-versioned directory mounted at runtime, not baked
       # into the image — the admin panel syncs + hot-reloads it in place, so
@@ -32,18 +44,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-  caddy:
-    image: caddy:latest
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile
-      - caddy_data:/data
-      - caddy_config:/config
-    restart: unless-stopped
 
 volumes:
   db-data:
-  caddy_data:
-  caddy_config:

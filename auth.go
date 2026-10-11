@@ -1,35 +1,38 @@
 package main
 
 import (
-	"crypto/rand"
+	"context"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"golang.org/x/crypto/bcrypt"
 	"io"
 	"log"
 	"net/http"
 	"os"
+	"strings"
+	"time"
 
 	_ "github.com/lib/pq"
 )
+
+// Accounts live in 629Manager (the 629fm identity service), not here. A
+// browser on 629fm.com holds a Manager session token in localStorage; the game
+// page POSTs it to /session, we resolve it with Manager and keep it in an
+// HttpOnly cookie, and every authenticated request re-resolves it, so 629fm
+// logouts and role changes apply immediately. Only `account` principals (not
+// guests) may play. Our own DB just maps a principal to the int player ID the
+// engine uses, plus game-only data (avatars).
 
 //
 // Types
 //
 
 type User struct {
-	ID        int    `json:"id"`
-	Username  string `json:"username"`
-	Password  string `json:"password,omitempty"`
-	AvatarURL string `json:"avatar_url,omitempty"`
-	IsAdmin   bool   `json:"is_admin"`
-}
-
-type Credentials struct {
-	Username string `json:"username"`
-	Password string `json:"password"`
+	ID          int    `json:"id"`
+	PrincipalID string `json:"-"`
+	Username    string `json:"username"`
+	IsAdmin     bool   `json:"is_admin"`
 }
 
 type MessageResponse struct {
@@ -40,45 +43,129 @@ type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
+// principal is the subset of Manager's Principal schema we use
+// (services/manager/openapi/manager-v1.yaml).
+type principal struct {
+	PrincipalID string  `json:"principalId"`
+	Type        string  `json:"type"` // guest | account
+	Username    *string `json:"username"`
+	Role        string  `json:"role"` // user | moderator | admin
+}
+
+type sessionIdentity struct {
+	ExpiresAt time.Time `json:"expiresAt"`
+	Principal principal `json:"principal"`
+}
+
+var (
+	errNoSession      = errors.New("not logged in")
+	errInvalidSession = errors.New("629fm session is invalid or expired; log in again")
+	errNotAccount     = errors.New("only logged-in 629fm accounts can play")
+)
+
 //
-// Helpers
+// 629Manager
 //
 
-func getSessionToken(r *http.Request) (string, error) {
-	c, err := r.Cookie("session_token")
-	if err != nil {
-		return "", err
+const sessionCookie = "session_token"
+
+var (
+	managerBaseURL = strings.TrimRight(envOr("MANAGER_BASE_URL", "http://manager:8081"), "/")
+	managerKey     = os.Getenv("MANAGER_RAYCAST_SERVICE_KEY")
+	managerHTTP    = &http.Client{Timeout: 5 * time.Second}
+)
+
+func envOr(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
 	}
-	return c.Value, nil
+	return def
+}
+
+// resolveSession is Manager's getCurrentSession: the service key says who we
+// are, the bearer token says who the player is.
+func resolveSession(ctx context.Context, token string) (sessionIdentity, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, managerBaseURL+"/v1/sessions/current", nil)
+	if err != nil {
+		return sessionIdentity{}, err
+	}
+	req.Header.Set("X-Service-Key", managerKey)
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	res, err := managerHTTP.Do(req)
+	if err != nil {
+		return sessionIdentity{}, fmt.Errorf("manager: %w", err)
+	}
+	defer res.Body.Close()
+
+	switch {
+	case res.StatusCode == http.StatusBadRequest || res.StatusCode == http.StatusUnauthorized:
+		return sessionIdentity{}, errInvalidSession
+	case res.StatusCode != http.StatusOK:
+		body, _ := io.ReadAll(io.LimitReader(res.Body, 512))
+		return sessionIdentity{}, fmt.Errorf("manager: HTTP %d: %s", res.StatusCode, body)
+	}
+
+	var id sessionIdentity
+	if err := json.NewDecoder(res.Body).Decode(&id); err != nil {
+		return sessionIdentity{}, fmt.Errorf("manager: decoding session: %w", err)
+	}
+	return id, nil
+}
+
+// userFromToken resolves a Manager token to a player, creating the player row
+// on first sight and keeping its username in step with the 629fm account.
+func userFromToken(ctx context.Context, db *sql.DB, token string) (User, time.Time, error) {
+	if token == "" {
+		return User{}, time.Time{}, errNoSession
+	}
+	id, err := resolveSession(ctx, token)
+	if err != nil {
+		return User{}, time.Time{}, err
+	}
+	p := id.Principal
+	if p.Type != "account" || p.Username == nil || *p.Username == "" {
+		return User{}, time.Time{}, errNotAccount
+	}
+
+	user := User{PrincipalID: p.PrincipalID, Username: *p.Username, IsAdmin: p.Role == "admin"}
+	err = db.QueryRowContext(ctx, `
+		INSERT INTO players (principal_id, username) VALUES ($1, $2)
+		ON CONFLICT (principal_id) DO UPDATE SET username = EXCLUDED.username
+		RETURNING id
+	`, user.PrincipalID, user.Username).Scan(&user.ID)
+	if err != nil {
+		return User{}, time.Time{}, fmt.Errorf("player upsert: %w", err)
+	}
+	return user, id.ExpiresAt, nil
 }
 
 func getUserBySessionCookie(db *sql.DB, r *http.Request) (User, error) {
-	token, err := getSessionToken(r)
+	c, err := r.Cookie(sessionCookie)
 	if err != nil {
-		return User{}, err
+		return User{}, errNoSession
 	}
-
-	var user User
-	err = db.QueryRow(`
-		SELECT u.id, u.username, u.password, u.is_admin
-		FROM sessions s
-		JOIN users u ON u.id = s.user_id
-		WHERE s.token = $1
-	`, token).Scan(&user.ID, &user.Username, &user.Password, &user.IsAdmin)
-	if err != nil {
-		return User{}, err
-	}
-
-	return user, nil
+	user, _, err := userFromToken(r.Context(), db, c.Value)
+	return user, err
 }
 
-func newToken64() (string, error) {
-	b := make([]byte, 8) // 8 bytes = 64 bits
-	if _, err := rand.Read(b); err != nil {
-		return "", err
+// writeAuthError maps an auth failure to a response; Manager outages are
+// logged and reported as 503 rather than as "not logged in".
+func writeAuthError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errNoSession), errors.Is(err, errInvalidSession):
+		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: err.Error()})
+	case errors.Is(err, errNotAccount):
+		writeJSON(w, http.StatusForbidden, ErrorResponse{Error: err.Error()})
+	default:
+		log.Println("auth:", err)
+		writeJSON(w, http.StatusServiceUnavailable, ErrorResponse{Error: "629fm accounts are unavailable, try again later"})
 	}
-	return hex.EncodeToString(b), nil // 16 hex chars
 }
+
+//
+// Helpers
+//
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
@@ -90,25 +177,6 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func readJSON(r *http.Request, dst any) error {
 	return json.NewDecoder(r.Body).Decode(dst)
-}
-
-func hashPassword(password string) (string, error) {
-	hash, err := bcrypt.GenerateFromPassword(
-		[]byte(password),
-		bcrypt.DefaultCost,
-	)
-	if err != nil {
-		return "", err
-	}
-	return string(hash), nil
-}
-
-func checkPassword(hash, password string) bool {
-	err := bcrypt.CompareHashAndPassword(
-		[]byte(hash),
-		[]byte(password),
-	)
-	return err == nil
 }
 
 //
@@ -136,144 +204,26 @@ func connectPostgresDB() *sql.DB {
 	return db
 }
 
-func insertSession(db *sql.DB, user User, session_token string) error {
+func updateAvatar(db *sql.DB, playerID int, avatar []byte, mimeType, filename string) error {
 	_, err := db.Exec(
-		"INSERT INTO sessions(user_id, token) VALUES($1, $2)",
-		user.ID,
-		session_token,
-	)
-	if err != nil {
-		log.Println("session insert error:", err)
-		return err
-	}
-
-	fmt.Printf("session for user %s inserted\n", user.Username)
-	return err
-}
-
-func terminateSession(db *sql.DB, session_token string) error {
-	_, err := db.Exec(
-		"DELETE FROM sessions WHERE token=$1",
-		session_token,
-	)
-	if err != nil {
-		log.Println("session insert error:", err)
-		return err
-	}
-
-	fmt.Printf("session terminated\n")
-	return err
-}
-
-func insertUser(db *sql.DB, user User) error {
-	hashedPassword, err := hashPassword(user.Password)
-	if err != nil {
-		log.Println("password hashing error:", err)
-		return err
-	}
-
-	_, err = db.Exec(
-		"INSERT INTO users(username, password) VALUES($1, $2)",
-		user.Username,
-		hashedPassword,
-	)
-	if err != nil {
-		log.Println("insert error:", err)
-		return err
-	}
-
-	fmt.Printf("user %s inserted\n", user.Username)
-	return err
-}
-
-func updatePassword(db *sql.DB, username, newPassword string) error {
-	hash, err := hashPassword(newPassword)
-	if err != nil {
-		return err
-	}
-
-	_, err = db.Exec(
-		"UPDATE users SET password=$1 WHERE username=$2",
-		hash, username,
-	)
-	return err
-}
-
-func deleteUser(db *sql.DB, username string) error {
-	_, err := db.Exec(
-		"DELETE FROM users WHERE username=$1",
-		username,
-	)
-	if err != nil {
-		log.Println("deleting error:", err)
-		return err
-	}
-
-	fmt.Printf("user %s deleted\n", username)
-
-	return nil
-}
-
-func getUserByUsername(db *sql.DB, username string) (User, error) {
-	var user User
-
-	err := db.QueryRow(
-		"SELECT id, username, password FROM users WHERE username = $1",
-		username,
-	).Scan(&user.ID, &user.Username, &user.Password)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			fmt.Println("no user found")
-			return user, err
-		}
-		fmt.Println("query error:", err)
-		return user, err
-	}
-
-	return user, err
-}
-
-func getUserByID(db *sql.DB, user_id int) (User, error) {
-	var user User
-
-	err := db.QueryRow(
-		"SELECT id, username, password FROM users WHERE id = $1",
-		user_id,
-	).Scan(&user.ID, &user.Username, &user.Password)
-
-	if err != nil {
-		if err == sql.ErrNoRows {
-			fmt.Println("no user found")
-			return user, err
-		}
-		fmt.Println("query error:", err)
-		return user, err
-	}
-
-	return user, err
-}
-
-func updateAvatar(db *sql.DB, username string, avatar []byte, mimeType, filename string) error {
-	_, err := db.Exec(
-		`UPDATE users
+		`UPDATE players
 		 SET avatar = $1, avatar_mime = $2, avatar_filename = $3
-		 WHERE username = $4`,
-		avatar, mimeType, filename, username,
+		 WHERE id = $4`,
+		avatar, mimeType, filename, playerID,
 	)
 	return err
 }
 
-func getAvatar(db *sql.DB, username string) ([]byte, string, string, error) {
+func getAvatar(db *sql.DB, playerID int) ([]byte, string, string, error) {
 	var data []byte
 	var mimeType sql.NullString
 	var filename sql.NullString
 
 	err := db.QueryRow(
 		`SELECT avatar, avatar_mime, avatar_filename
-		 FROM users
-		 WHERE username = $1`,
-		username,
+		 FROM players
+		 WHERE id = $1`,
+		playerID,
 	).Scan(&data, &mimeType, &filename)
 
 	if err != nil {
@@ -281,6 +231,44 @@ func getAvatar(db *sql.DB, username string) ([]byte, string, string, error) {
 	}
 
 	return data, mimeType.String, filename.String, nil
+}
+
+//
+// Handlers
+//
+
+// sessionHandle trades the browser's Manager token (Authorization: Bearer)
+// for the game's session cookie. Pages call it on every load, so the cookie
+// always follows whichever 629fm account the browser is currently logged in as.
+func sessionHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
+	if r.Method != http.MethodPost {
+		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
+		return
+	}
+
+	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if !ok {
+		writeAuthError(w, errNoSession)
+		return
+	}
+	token = strings.TrimSpace(token)
+	user, expires, err := userFromToken(r.Context(), db, token)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+
+	http.SetCookie(w, &http.Cookie{
+		Name:  sessionCookie,
+		Value: token,
+		// No Path: the browser defaults it to this request's directory, which
+		// is /raycast behind the 629fm proxy and / when run standalone.
+		Expires:  expires,
+		HttpOnly: true,
+		SameSite: http.SameSiteStrictMode,
+		Secure:   r.TLS != nil || r.Header.Get("X-Forwarded-Proto") == "https",
+	})
+	writeJSON(w, http.StatusOK, user)
 }
 
 func uploadAvatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
@@ -298,7 +286,7 @@ func uploadAvatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	user, err := getUserBySessionCookie(db, r)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
+		writeAuthError(w, err)
 		return
 	}
 
@@ -338,7 +326,7 @@ func uploadAvatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 		return
 	}
 
-	if err := updateAvatar(db, user.Username, data, mimeType, header.Filename); err != nil {
+	if err := updateAvatar(db, user.ID, data, mimeType, header.Filename); err != nil {
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to save avatar"})
 		return
 	}
@@ -356,11 +344,11 @@ func avatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 
 	user, err := getUserBySessionCookie(db, r)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
+		writeAuthError(w, err)
 		return
 	}
 
-	data, mimeType, filename, err := getAvatar(db, user.Username)
+	data, mimeType, filename, err := getAvatar(db, user.ID)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			writeJSON(w, http.StatusNotFound, ErrorResponse{Error: "user not found"})
@@ -381,189 +369,4 @@ func avatarHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(data)
-}
-
-func registerHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
-		return
-	}
-
-	defer r.Body.Close()
-
-	var creds Credentials
-	if err := readJSON(r, &creds); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json"})
-		return
-	}
-
-	if creds.Username == "" || creds.Password == "" {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "username and password are required"})
-		return
-	}
-
-	user := User{
-		Username: creds.Username,
-		Password: creds.Password,
-	}
-
-	if err := insertUser(db, user); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "registration failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusCreated, MessageResponse{
-		Message: fmt.Sprintf("registration successful; created user %s", user.Username),
-	})
-}
-
-func loginHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
-		return
-	}
-
-	defer r.Body.Close()
-
-	var creds Credentials
-	if err := readJSON(r, &creds); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json"})
-		return
-	}
-
-	if creds.Username == "" || creds.Password == "" {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "username and password are required"})
-		return
-	}
-
-	user, err := getUserByUsername(db, creds.Username)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid username or password"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "user fetching failed"})
-		return
-	}
-
-	if !checkPassword(user.Password, creds.Password) {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid username or password"})
-		return
-	}
-
-	token, err := newToken64()
-	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "user token generation failed"})
-		return
-	}
-
-	if err := insertSession(db, user, token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "session creation failed"})
-		return
-	}
-
-	http.SetCookie(w, &http.Cookie{
-		Name:     "session_token",
-		Value:    token,
-		Path:     "/",
-		MaxAge:   60 * 60 * 24 * 7, // 7 days
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		Secure:   false, // true in production with HTTPS
-	})
-
-	writeJSON(w, http.StatusOK, MessageResponse{
-		Message: fmt.Sprintf("login successful; welcome %s", user.Username),
-	})
-
-}
-
-func meHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodGet {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use GET"})
-		return
-	}
-
-	user, err := getUserBySessionCookie(db, r)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, MessageResponse{
-		Message: fmt.Sprintf("you are logged in as: %s", user.Username),
-	})
-}
-
-func logoutHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
-		return
-	}
-
-	defer r.Body.Close()
-
-	user, err := getUserBySessionCookie(db, r)
-	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
-		return
-	}
-
-	token, _ := getSessionToken(r)
-	if err := terminateSession(db, token); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "logout failed"})
-		return
-	}
-
-	activeSessionsMu.Lock()
-	if s, ok := activeSessions[user.ID]; ok && s != nil {
-		s.wsConn.Close()
-	}
-	activeSessionsMu.Unlock()
-
-	writeJSON(w, http.StatusOK, MessageResponse{Message: "logged out successfully"})
-}
-
-func unregisterHandle(w http.ResponseWriter, r *http.Request, db *sql.DB) {
-	if r.Method != http.MethodPost {
-		writeJSON(w, http.StatusMethodNotAllowed, ErrorResponse{Error: "use POST"})
-		return
-	}
-
-	defer r.Body.Close()
-
-	var creds Credentials
-	if err := readJSON(r, &creds); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "invalid json"})
-		return
-	}
-
-	if creds.Username == "" || creds.Password == "" {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "username and password are required"})
-		return
-	}
-
-	user, err := getUserByUsername(db, creds.Username)
-	if err != nil {
-		if err == sql.ErrNoRows {
-			writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid username or password"})
-			return
-		}
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "user fetching failed"})
-		return
-	}
-
-	if !checkPassword(user.Password, creds.Password) {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "invalid username or password"})
-		return
-	}
-
-	if err := deleteUser(db, creds.Username); err != nil {
-		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "unregister failed"})
-		return
-	}
-
-	writeJSON(w, http.StatusOK, MessageResponse{
-		Message: fmt.Sprintf("user %s unregistered", user.Username),
-	})
 }

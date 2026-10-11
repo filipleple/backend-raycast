@@ -1,5 +1,0 @@
-game.example.com {
-    # compress engine.wasm (~4 MB raw, ~1.1 MB gzip) and the JSON state stream
-    encode zstd gzip
-    reverse_proxy go-backend:8080
-}

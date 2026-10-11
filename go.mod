@@ -6,7 +6,6 @@ require (
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/gorilla/websocket v1.5.3
 	github.com/lib/pq v1.12.0
-	golang.org/x/crypto v0.49.0
 )
 
 require (

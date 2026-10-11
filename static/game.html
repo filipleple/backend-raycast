@@ -17,7 +17,8 @@
         filter:drop-shadow(0 0 24px #000)">
 </div>
 
-<script src="/wasm_exec.js"></script>
+<script src="wasm_exec.js"></script>
+<script src="session.js"></script>
 <script>
 // Browser-side engine: the page owns networking, timing and input; the Go
 // engine compiled to WebAssembly (cmd/client → engine.wasm, global `raycast`)
@@ -26,16 +27,16 @@
 const canvas = document.getElementById("screen");
 const ctx = canvas.getContext("2d");
 
-fetch("/me").then(res => {
-    if (!res.ok) {
+startSession().then(({ error }) => {
+    if (error) {
         ctx.fillStyle = "white";
-        ctx.font = "20px monospace";
+        ctx.font = "12px monospace";
         ctx.textAlign = "center";
-        ctx.fillText("not logged in", canvas.width / 2, canvas.height / 2 - 16);
+        ctx.fillText(error, canvas.width / 2, canvas.height / 2 - 16);
         ctx.fillStyle = "#aaaaff";
         ctx.fillText("< back to menu", canvas.width / 2, canvas.height / 2 + 16);
         canvas.style.cursor = "pointer";
-        canvas.onclick = () => window.location.href = "/";
+        canvas.onclick = () => window.location.href = "./";
         return;
     }
     loadEngine().then(startGame).catch(e => {
@@ -51,7 +52,7 @@ function loadEngine() {
     return new Promise((resolve, reject) => {
         const go = new Go();
         window.onRaycastReady = resolve;
-        WebAssembly.instantiateStreaming(fetch("/engine.wasm"), go.importObject)
+        WebAssembly.instantiateStreaming(fetch("engine.wasm"), go.importObject)
             .then(r => go.run(r.instance))
             .catch(reject);
     });
@@ -81,7 +82,7 @@ const audio = {
 
     buffer(url) {
         if (!this.buffers[url]) {
-            this.buffers[url] = fetch(url)
+            this.buffers[url] = fetch(gameURL(url))
                 .then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.arrayBuffer(); })
                 .then(b => this.ctx.decodeAudioData(b));
             this.buffers[url].catch(e => { console.error("audio load failed:", e); delete this.buffers[url]; });
@@ -176,7 +177,7 @@ const viewer = {
     img: document.getElementById("viewerImg"),
     get open() { return this.el.style.display !== "none"; },
     show(ev) {
-        this.img.src = ev.src;
+        this.img.src = gameURL(ev.src);
         this.el.style.display = "flex";
     },
     close() {
@@ -236,7 +237,7 @@ function startGame() {
         for (const path of raycast.wanted()) {
             if (inflight.has(path)) continue;
             inflight.add(path);
-            const url = "/content/" + path.split("/").map(encodeURIComponent).join("/") + "?v=" + version;
+            const url = "content/" + path.split("/").map(encodeURIComponent).join("/") + "?v=" + version;
             fetch(url)
                 .then(r => { if (!r.ok) throw new Error(`${url}: HTTP ${r.status}`); return r.arrayBuffer(); })
                 .then(buf => raycast.addFile(path, new Uint8Array(buf)))
@@ -246,7 +247,7 @@ function startGame() {
     }
     function fetchAvatar(id) {
         avatarsAsked.add(id);
-        fetch(`/avatar/player/${id}`)
+        fetch(`avatar/player/${id}`)
             .then(r => r.ok ? r.arrayBuffer() : null)
             .then(buf => { if (buf) raycast.setAvatar(id, new Uint8Array(buf)); })
             .catch(() => {});
@@ -355,7 +356,7 @@ function startGame() {
         ctx.fillStyle = "#aaaaff";
         ctx.fillText("< back to menu", canvas.width / 2, canvas.height / 2 + 16);
         canvas.style.cursor = "pointer";
-        canvas.onclick = () => window.location.href = "/";
+        canvas.onclick = () => window.location.href = "./";
     };
 }
 </script>

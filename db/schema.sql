@@ -1,17 +1,12 @@
-CREATE TABLE IF NOT EXISTS users (
+-- Accounts are 629fm's (629Manager); this only maps a principal to the int
+-- player ID the engine uses, plus game-only data.
+CREATE TABLE IF NOT EXISTS players (
     id               SERIAL PRIMARY KEY,
-    username         TEXT UNIQUE NOT NULL,
-    password         TEXT NOT NULL,
+    principal_id     UUID UNIQUE NOT NULL,
+    username         TEXT NOT NULL,   -- copy of the 629fm username, refreshed on login
     avatar           BYTEA,
     avatar_mime      TEXT,
-    avatar_filename  TEXT,
-    is_admin         BOOLEAN NOT NULL DEFAULT false
-);
-
-CREATE TABLE IF NOT EXISTS sessions (
-    id      SERIAL PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token   TEXT UNIQUE NOT NULL
+    avatar_filename  TEXT
 );
 
 -- Per-file Google Sheets source: which spreadsheet tab feeds each content CSV.
@@ -21,4 +16,3 @@ CREATE TABLE IF NOT EXISTS content_sources (
     sheet_id  TEXT NOT NULL,
     gid       TEXT NOT NULL
 );
-

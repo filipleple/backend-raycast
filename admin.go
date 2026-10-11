@@ -80,7 +80,7 @@ func (a *adminServer) routes() {
 func (a *adminServer) requireAdmin(w http.ResponseWriter, r *http.Request) (User, bool) {
 	user, err := getUserBySessionCookie(a.db, r)
 	if err != nil {
-		writeJSON(w, http.StatusUnauthorized, ErrorResponse{Error: "not logged in"})
+		writeAuthError(w, err)
 		return User{}, false
 	}
 	if !user.IsAdmin {
@@ -133,7 +133,7 @@ func (a *adminServer) page(w http.ResponseWriter, r *http.Request) {
 	// return proper 401/403).
 	user, err := getUserBySessionCookie(a.db, r)
 	if err != nil || !user.IsAdmin {
-		http.Redirect(w, r, "/", http.StatusFound)
+		http.Redirect(w, r, "./", http.StatusFound) // relative: the game may sit under /raycast/
 		return
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
