@@ -37,7 +37,7 @@ func (t *Texture) At(x, y int) (r, g, b, a uint8) {
 	return t.Pix[i], t.Pix[i+1], t.Pix[i+2], t.Pix[i+3]
 }
 
-var textureSubdirs = [6]string{"walls", "doors", "floors", "misc", "pictures", "frames"}
+var textureSubdirs = [6]string{"walls", "door", "floors", "misc", "pictures", "frames"}
 
 // errPending is returned by a content filesystem for a file that exists but
 // hasn't been downloaded yet (the browser engine fetches lazily). The loader
