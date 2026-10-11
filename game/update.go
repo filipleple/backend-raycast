@@ -58,7 +58,9 @@ func (e *Engine) use(p *Player, dirX, dirY float64) {
 	// a picture straight ahead opens full-screen in the browser
 	if connDoor == nil {
 		if pic := lookedAtPicture(m, p.X, p.Y, dirX, dirY); pic != nil {
-			p.emit(Event{"type": "picture", "src": pictureViewURL(pic)})
+			if src := pictureViewURL(pic); src != "" {
+				p.emit(Event{"type": "picture", "src": src})
+			}
 		}
 	}
 
@@ -66,21 +68,34 @@ func (e *Engine) use(p *Player, dirX, dirY float64) {
 
 	lookCol := int((p.X + dirX*m.TileSize*0.7) / m.TileSize)
 	lookRow := int((p.Y + dirY*m.TileSize*0.7) / m.TileSize)
-	if portal, ok := m.PortalDoors[[2]int{lookCol, lookRow}]; ok {
-		if portal.TargetMap == nil {
-			if newMap, err := e.buildMap(); err == nil {
-				px, py := findSpawn(newMap)
-				portal.TargetMap = newMap
-				portal.TargetPos = [2]float64{px, py}
-				newMap.ID = len(e.world.Maps)
-				e.world.Maps = append(e.world.Maps, newMap)
-			}
-		}
-		if portal.TargetMap != nil {
-			p.CurrentMap = portal.TargetMap
-			p.X, p.Y = portal.TargetPos[0], portal.TargetPos[1]
+	if lookCol >= 0 && lookCol < m.Cols && lookRow >= 0 && lookRow < m.Rows {
+		if target := e.levels[m.Grid[lookRow][lookCol].Portal]; target != nil {
+			p.CurrentMap = target
+			p.X, p.Y, p.Angle = portalArrival(target, m.Level)
 		}
 	}
+}
+
+// portalArrival is where a player coming from level `from` lands on m: in
+// front of the portal leading back, facing away from it, or at m's spawn if
+// there is no way back.
+func portalArrival(m *Map, from string) (x, y, angle float64) {
+	for r := 0; r < m.Rows; r++ {
+		for c := 0; c < m.Cols; c++ {
+			if m.Grid[r][c].Portal != from {
+				continue
+			}
+			for _, d := range dirs {
+				nc, nr := c+d[0], r+d[1]
+				if walkableCell(m, nc, nr) {
+					return (float64(nc) + 0.5) * m.TileSize, (float64(nr) + 0.5) * m.TileSize,
+						math.Atan2(float64(d[1]), float64(d[0]))
+				}
+			}
+		}
+	}
+	x, y = findSpawn(m)
+	return x, y, 0
 }
 
 // afterMove runs everything keyed off the player's final position for the

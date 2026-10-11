@@ -16,6 +16,7 @@ type Def struct {
 	Door         bool
 	Picture      bool   // wall face is a framed picture
 	Frame        string // frame-overlay texture name ("" -> default frame)
+	Portal       string // Space on this wall travels to that map CSV ("" = not a portal)
 }
 
 // fallbackDef is used for IDs missing from definitions.csv: invisible,
@@ -53,7 +54,7 @@ func loadDefinitions(path string) (map[string]Def, error) {
 		}
 	}
 
-	// picture/frame are optional columns — an out-of-date sheet without them
+	// picture/frame/portal are optional columns — an out-of-date sheet without them
 	// still loads (defaulting to non-picture tiles).
 	cell := func(row []string, name string) string {
 		if i, ok := col[name]; ok && i < len(row) {
@@ -73,6 +74,7 @@ func loadDefinitions(path string) (map[string]Def, error) {
 			Door:         row[col["door"]] == "1",
 			Picture:      cell(row, "picture") == "1",
 			Frame:        cell(row, "frame"),
+			Portal:       cell(row, "portal"),
 		}
 	}
 	return defs, nil

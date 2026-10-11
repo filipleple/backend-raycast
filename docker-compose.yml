@@ -24,6 +24,10 @@ services:
       CONTENT_DIR: /app/content
       # Optional: promote this user to admin on boot (idempotent).
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      # Department of Vision gallery level (empty DOV_API_URL turns it off)
+      DOV_API_URL: ${DOV_API_URL-https://629fm.com}
+      DOV_WEB_URL: ${DOV_WEB_URL:-}
+      DOV_ROTATE_SECONDS: ${DOV_ROTATE_SECONDS:-60}
     volumes:
       # Game content is a git-versioned directory mounted at runtime, not baked
       # into the image — the admin panel syncs + hot-reloads it in place, so

@@ -6,7 +6,9 @@ import (
 	"image"
 	"io"
 	"io/fs"
+	"maps"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -69,10 +71,9 @@ func (c *Client) Apply(data []byte) error {
 	if s := msg.Map; s != nil {
 		m := &Map{
 			ID: s.ID, Cols: s.Cols, Rows: s.Rows, TileSize: TileSize,
-			Grid:        make([][]Symbol, s.Rows),
-			Textures:    c.textures,
-			DoorCells:   map[[2]int]*Door{},
-			PortalDoors: map[[2]int]*PortalDoor{},
+			Grid:      make([][]Symbol, s.Rows),
+			Textures:  c.textures,
+			DoorCells: map[[2]int]*Door{},
 		}
 		for r := range m.Grid {
 			m.Grid[r] = make([]Symbol, s.Cols)
@@ -127,12 +128,18 @@ func (c *Client) Wanted() []string {
 
 // AddFile hands over a downloaded content file.
 func (c *Client) AddFile(path string, data []byte) {
-	if !c.known[path] {
+	if !c.listed(path) {
 		return // stale download from a previous content version
 	}
 	c.files[path] = data
 	c.dirty = true
 	c.resolve()
+}
+
+// listed reports whether the server may serve path: manifest files, plus
+// gallery composites, which the grid names instead of the manifest.
+func (c *Client) listed(path string) bool {
+	return c.known[path] || strings.HasPrefix(path, dovFilePrefix)
 }
 
 // SetAvatar decodes another player's avatar image.
@@ -149,16 +156,38 @@ func (c *Client) resolve() {
 	}
 	c.dirty = false
 	fsys := clientFS{c}
+	inUse := map[string]bool{}
 	for r := range c.m.Grid {
 		for _, sym := range c.m.Grid[r] {
 			ensureSymbolTextures(fsys, c.m, sym)
+			if strings.HasPrefix(sym.TextureName, dovTexturePrefix) {
+				inUse[sym.TextureName] = true
+			}
 		}
 	}
+	c.pruneGallery(inUse)
 	if c.sprite == nil {
 		if img, err := loadImageFile(fsys, spriteFile); err == nil {
 			c.sprite = textureFromImage(img, true)
 		}
 	}
+}
+
+// pruneGallery drops gallery composites no slot shows any more: they rotate
+// every minute or so, and WebAssembly memory never shrinks.
+func (c *Client) pruneGallery(inUse map[string]bool) {
+	stale := func(path string) bool {
+		name, ok := strings.CutPrefix(path, "textures/pictures/")
+		return ok && strings.HasPrefix(name, dovTexturePrefix) && !inUse[strings.TrimSuffix(name, ".png")]
+	}
+	for key := range c.textures {
+		if name, ok := strings.CutPrefix(key, "picture:"); ok && strings.HasPrefix(name, dovTexturePrefix) && !inUse[strings.TrimSuffix(name, "+")] {
+			delete(c.textures, key)
+		}
+	}
+	maps.DeleteFunc(c.wanted, func(p string, _ bool) bool { return stale(p) })
+	maps.DeleteFunc(c.requested, func(p string, _ bool) bool { return stale(p) })
+	maps.DeleteFunc(c.files, func(p string, _ []byte) bool { return stale(p) })
 }
 
 // Step predicts one 100 ms tick of movement for the held keys (mouse yaw is
@@ -200,7 +229,7 @@ func (f clientFS) Open(name string) (fs.File, error) {
 	if data, ok := f.c.files[name]; ok {
 		return &memFile{name: name, Reader: bytes.NewReader(data)}, nil
 	}
-	if f.c.known[name] {
+	if f.c.listed(name) {
 		if !f.c.requested[name] {
 			f.c.wanted[name] = true
 		}

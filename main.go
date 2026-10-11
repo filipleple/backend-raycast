@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"log"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"raycast/game"
 
@@ -41,6 +43,17 @@ func main() {
 	engine, err := game.NewEngine(contentDir)
 	if err != nil {
 		log.Fatal("loading game assets: ", err)
+	}
+
+	// Department of Vision gallery on the "dov" picture slots; off without a
+	// 629fm base URL (slots then show empty frames)
+	if api := os.Getenv("DOV_API_URL"); api != "" {
+		go engine.RunDoV(context.Background(), game.DovConfig{
+			APIURL: api,
+			WebURL: os.Getenv("DOV_WEB_URL"),
+			Poll:   envSeconds("DOV_POLL_SECONDS", 300),
+			Rotate: envSeconds("DOV_ROTATE_SECONDS", 60),
+		})
 	}
 
 	// Optionally promote a bootstrap admin on startup (idempotent).
@@ -113,11 +126,22 @@ func main() {
 		w.Write(data)
 	})
 
+	// full-screen view of a gallery slot's original image
+	http.Handle("/dov/view/", engine.DovViewHandler("/dov/view/"))
+
 	http.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
 		handleWS(w, r, db, engine)
 	})
 
 	log.Fatal(http.ListenAndServe(":8080", nil))
+}
+
+// envSeconds reads a positive number of seconds from the environment.
+func envSeconds(name string, def int) time.Duration {
+	if n, err := strconv.Atoi(os.Getenv(name)); err == nil && n > 0 {
+		return time.Duration(n) * time.Second
+	}
+	return time.Duration(def) * time.Second
 }
 
 func handleWS(w http.ResponseWriter, r *http.Request, db *sql.DB, engine *game.Engine) {

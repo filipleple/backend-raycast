@@ -15,7 +15,7 @@ func copyContent(t *testing.T) string {
 	src := "../content"
 	dst := t.TempDir()
 	for _, name := range []string{
-		"definitions.csv", "MUSIC_DEFS.csv", "TILES.csv", "MUSIC.csv", "hatman.gif",
+		"definitions.csv", "MUSIC_DEFS.csv", "TILES.csv", "MUSIC.csv", "DOV_TILES.csv", "hatman.gif",
 		"textures", "scripts",
 	} {
 		if err := copyTree(filepath.Join(src, name), filepath.Join(dst, name)); err != nil {

@@ -22,6 +22,7 @@ type Symbol struct {
 	Door         bool   // wall layer is a door
 	Picture      bool   // wall layer is a framed picture
 	Walkable     bool   // wall walk_through AND floor walk_through
+	Portal       string // wall layer is a portal to this level ("" = none)
 
 	FrameTexture   string // frame overlay for picture cells ("" = none)
 	FloorTexture   string // "" for solid walls / untextured
@@ -32,13 +33,6 @@ type Symbol struct {
 type Door struct {
 	Col, Row     int
 	ExitA, ExitB [2]float64
-}
-
-// PortalDoor is a cross-map door. The target map is built lazily on first use.
-type PortalDoor struct {
-	Col, Row  int
-	TargetMap *Map
-	TargetPos [2]float64
 }
 
 var dirs = [4][2]int{{1, 0}, {-1, 0}, {0, 1}, {0, -1}}
@@ -82,6 +76,7 @@ func makeSymbol(defs map[string]Def, ceilingID, wallID, floorID string) Symbol {
 		Door:           wallDef.Door,
 		Picture:        wallDef.Picture,
 		Walkable:       wallDef.WalkThrough && floorDef.WalkThrough,
+		Portal:         wallDef.Portal,
 		FrameTexture:   frameTex,
 		FloorTexture:   floorTex,
 		CeilingTexture: ceilingTex,

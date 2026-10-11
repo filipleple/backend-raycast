@@ -1,4 +1,4 @@
-id,texture_name,transparency,walk_through,wall,floor,door,picture,frame
+id,texture_name,transparency,walk_through,wall,floor,door,picture,frame,portal
 0000,empty,1,1,0,0,0,0,0
 0001,spawn,1,1,0,0,0,0,0
 0002,exit,1,1,0,0,0,0,0
@@ -14,6 +14,13 @@ id,texture_name,transparency,walk_through,wall,floor,door,picture,frame
 0108,icewall,0,0,1,0,0,0,0
 0109,lavawall,0,0,1,0,0,0,0
 0110,baffordwall,0,0,1,0,0,0,0
+0111,void,1,0,1,0,0,0,0
+0112,void1,1,0,1,0,0,0,0
+0113,black,0,0,1,0,0,0,0
+0114,space,0,0,1,0,0,0,0
+0115,space1,0,0,1,0,0,0,0
+0116,space2,0,0,1,0,0,0,0
+0117,space3,0,0,1,0,0,0,0
 0200,grass,0,1,0,1,0,0,0
 0201,dirt,0,1,0,1,0,0,0
 0202,sand,0,1,0,1,0,0,0
@@ -32,6 +39,11 @@ id,texture_name,transparency,walk_through,wall,floor,door,picture,frame
 0215,woodfloor1,0,1,0,1,0,0,0
 0216,tilesred,0,1,0,1,0,0,0
 0217,tilesblue,0,1,0,1,0,0,0
+0218,black,0,1,0,1,0,0,0
+0219,space,0,1,0,1,0,0,0
+0220,space1,0,1,0,1,0,0,0
+0221,space2,0,1,0,1,0,0,0
+0222,space3,0,1,0,1,0,0,0
 0300,TBD,1,0,0,1,0,0,0
 0301,TBD,1,0,0,1,0,0,0
 0302,lava,1,0,0,1,0,0,0
@@ -76,3 +88,6 @@ id,texture_name,transparency,walk_through,wall,floor,door,picture,frame
 0905,treasure,1,1,1,0,0,0,0
 6666,golden,1,0,1,0,0,0,1
 7777,hand,0,0,1,0,0,1,golden
+0405,portal,0,0,1,0,0,0,0,DOV_TILES.csv
+0406,portal,0,0,1,0,0,0,0,TILES.csv
+7778,dov,0,0,1,0,0,1,golden

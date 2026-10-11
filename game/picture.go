@@ -16,6 +16,15 @@ const (
 
 var pictureBacking = [3]uint8{24, 18, 12}
 
+// Department of Vision gallery slots (dov.go): a picture cell whose texture is
+// dovSlotTexture is a slot. A filled slot's texture is dovTexturePrefix+name,
+// a finished composite (no frame) served from memory under dovFilePrefix.
+const (
+	dovSlotTexture   = "dov"
+	dovTexturePrefix = "dov/"
+	dovFilePrefix    = "textures/pictures/" + dovTexturePrefix
+)
+
 // pictureTextureKey names a picture cell's composite in Map.Textures.
 func pictureTextureKey(picture, frame string) string {
 	return "picture:" + picture + "+" + frame

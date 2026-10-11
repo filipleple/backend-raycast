@@ -136,7 +136,7 @@ func ensureSymbolTextures(fsys fs.FS, m *Map, sym Symbol) {
 		ensurePictureTexture(fsys, m, sym)
 	case sym.Wall && sym.TextureName != "":
 		preferred := "walls"
-		if sym.Door {
+		if sym.Door || sym.Portal != "" {
 			preferred = "door"
 		}
 		ensureTexture(fsys, m, sym.TextureName, preferred, sym.Transparency)

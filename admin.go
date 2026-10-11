@@ -21,9 +21,9 @@ import (
 //go:embed templates/admin.html
 var adminHTML []byte
 
-// csvTargets are the four content files sourced from Google Sheets tabs, in a
+// csvTargets are the content files sourced from Google Sheets tabs, in a
 // fixed order. Each maps to one row in the content_sources table.
-var csvTargets = []string{"definitions.csv", "TILES.csv", "MUSIC.csv", "MUSIC_DEFS.csv"}
+var csvTargets = []string{"definitions.csv", "TILES.csv", "MUSIC.csv", "MUSIC_DEFS.csv", "DOV_TILES.csv"}
 
 // assetKinds maps an upload "kind" to the content subdirectory it lands in and
 // the content types allowed for it. Textures are sniffed; audio is checked by

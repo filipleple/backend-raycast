@@ -9,6 +9,7 @@ import (
 	"image/jpeg"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -25,6 +26,8 @@ type Engine struct {
 
 	root      string
 	defs      map[string]Def
+	levels    map[string]*Map // every map by tiles CSV name, portal targets
+	dov       *dovState       // Department of Vision gallery slots, see dov.go
 	musicDefs map[string]MusicDef
 	scripts   *scriptHost
 
@@ -47,7 +50,8 @@ func NewEngine(root string) (*Engine, error) {
 		root:      root,
 		defs:      c.defs,
 		musicDefs: c.musicDefs,
-		world:     &World{Maps: []*Map{c.baseMap}},
+		world:     &World{Maps: c.maps},
+		levels:    c.levels(),
 		renderer:  newRenderer(c.sprite),
 
 		pictureViews: map[string][]byte{},
@@ -56,41 +60,57 @@ func NewEngine(root string) (*Engine, error) {
 		contentVersion: c.version,
 	}
 	e.scripts = newScriptHost(filepath.Join(root, "scripts"))
+	e.dov = newDovState(root)
 	return e, nil
 }
 
+// baseLevel is the map everyone spawns on.
+const baseLevel = "TILES.csv"
+
 // mapPath consumes the split-format TILES.csv
-func mapPath(root string) string {
-	tiles := filepath.Join(root, "TILES.csv")
-	if _, err := os.Stat(tiles); err == nil {
+func mapPath(root, level string) string {
+	tiles := filepath.Join(root, level)
+	if _, err := os.Stat(tiles); err == nil || level != baseLevel {
 		return tiles
 	}
 	return filepath.Join(root, "map.csv") // obsolete, will error, should never happen
 }
 
-// buildMap loads the tile map + music zones under root, resolving cells through
-// defs and loading every referenced texture. It is a free function (not an
-// Engine method) so a content reload can build a map from freshly loaded defs
-// before those defs are swapped onto the engine.
-func buildMap(root string, defs map[string]Def) (*Map, error) {
-	grid, doorPositions, cols, rows, err := loadMapCSV(mapPath(root), defs)
+// musicPath is a level's zone grid: TILES.csv -> MUSIC.csv, DOV_TILES.csv ->
+// DOV_MUSIC.csv. Levels not named *TILES.csv have no zone music.
+func musicPath(root, level string) string {
+	stem, ok := strings.CutSuffix(level, "TILES.csv")
+	if !ok {
+		return ""
+	}
+	return filepath.Join(root, stem+"MUSIC.csv")
+}
+
+// buildMap loads one level's tile map + music zones under root, resolving
+// cells through defs and loading every referenced texture. It is a free
+// function (not an Engine method) so a content reload can build a map from
+// freshly loaded defs before those defs are swapped onto the engine.
+func buildMap(root string, defs map[string]Def, level string) (*Map, error) {
+	grid, doorPositions, cols, rows, err := loadMapCSV(mapPath(root, level), defs)
 	if err != nil {
 		return nil, err
 	}
 	fsys := os.DirFS(root)
 	m := &Map{
 		Cols: cols, Rows: rows,
-		TileSize:    TileSize,
-		Grid:        grid,
-		Textures:    map[string]*Texture{},
-		DoorCells:   makeCSVDoors(doorPositions, grid, cols, rows, TileSize),
-		PortalDoors: map[[2]int]*PortalDoor{},
+		TileSize:  TileSize,
+		Grid:      grid,
+		Textures:  map[string]*Texture{},
+		DoorCells: makeCSVDoors(doorPositions, grid, cols, rows, TileSize),
+		Level:     level,
 	}
-	zones, err := loadMusicCSV(filepath.Join(root, "MUSIC.csv"), cols, rows)
-	if err != nil {
-		return nil, err
+	if mp := musicPath(root, level); mp != "" {
+		zones, err := loadMusicCSV(mp, cols, rows)
+		if err != nil {
+			return nil, err
+		}
+		m.MusicZones = zones
 	}
-	m.MusicZones = zones
 
 	for r := 0; r < rows; r++ {
 		for c := 0; c < cols; c++ {
@@ -99,10 +119,6 @@ func buildMap(root string, defs map[string]Def) (*Map, error) {
 	}
 	return m, nil
 }
-
-// buildMap rebuilds a fresh base map from the engine's current defs — used to
-// lazily materialize portal target rooms at runtime.
-func (e *Engine) buildMap() (*Map, error) { return buildMap(e.root, e.defs) }
 
 // setCellLayer rewrites one layer of a cell through the definitions table,
 // exactly like the map loader would, and keeps DoorCells coherent. The change

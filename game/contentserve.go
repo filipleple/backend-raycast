@@ -69,6 +69,18 @@ func (e *Engine) ContentHandler(prefix string) http.Handler {
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		rel := strings.TrimPrefix(r.URL.Path, prefix)
+		if name, ok := strings.CutPrefix(rel, dovFilePrefix); ok {
+			// gallery composites are named by content, so any URL is immutable
+			data := e.dov.file(strings.TrimSuffix(name, ".png"))
+			if data == nil || !strings.HasSuffix(name, ".png") {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+			w.Header().Set("Content-Type", "image/png")
+			w.Write(data)
+			return
+		}
 		e.mu.RLock()
 		_, known := slices.BinarySearch(e.contentFiles, rel)
 		version := e.contentVersion

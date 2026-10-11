@@ -29,14 +29,14 @@ type Monster struct {
 
 // Map is a self-contained room.
 type Map struct {
-	Cols, Rows  int
-	TileSize    float64
-	Grid        [][]Symbol
-	Textures    map[string]*Texture
-	Monsters    []Monster
-	DoorCells   map[[2]int]*Door
-	PortalDoors map[[2]int]*PortalDoor
-	MusicZones  [][]string // parallel MUSIC.csv grid; nil = no zone music
+	Cols, Rows int
+	TileSize   float64
+	Grid       [][]Symbol
+	Textures   map[string]*Texture
+	Monsters   []Monster
+	DoorCells  map[[2]int]*Door
+	MusicZones [][]string // parallel MUSIC.csv grid; nil = no zone music
+	Level      string     // the tiles CSV this map was built from (portal target name)
 
 	// ID names the map on the wire (index into World.Maps). The rest is the
 	// server's change log for client-side engines; see netsync.go.

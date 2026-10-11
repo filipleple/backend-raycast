@@ -10,6 +10,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"strings"
 )
 
 // Pressing Space while facing a picture cell opens it full-screen in the
@@ -50,7 +51,14 @@ func lookedAtPicture(m *Map, x, y, dirX, dirY float64) *Symbol {
 	return nil
 }
 
+// pictureViewURL is where the viewer fetches sym from, "" for nothing to show.
 func pictureViewURL(sym *Symbol) string {
+	if name, ok := strings.CutPrefix(sym.TextureName, dovTexturePrefix); ok {
+		return "/dov/view/" + name
+	}
+	if sym.TextureName == dovSlotTexture {
+		return "" // vacant gallery slot
+	}
 	return "/picture/" + url.PathEscape(sym.TextureName) + "/" + url.PathEscape(sym.FrameTexture) + ".png"
 }
 
